@@ -510,4 +510,13 @@ config KHADAS_MCU_FAN_THERMAL
 	  If you say yes here you get support for the FAN controlled
 	  by the Microcontroller found on the Khadas VIM boards.
 
+config LENOVO_SYS_TEMP
+	tristate "Lenovo Surface Temperature Driver"
+	depends on THERMAL
+	default n
+	help
+	  This creates a sysfs property for front and back surface
+	  temperatures. These are meant to be populated by the a
+	  user space thermal management daemon.
+
 endif
