@@ -890,3 +890,5 @@ config INPUT_STPMIC1_ONKEY
 	  module will be called stpmic1_onkey.
 
 endif
+
+source "drivers/input/misc/haptic_hv/Kconfig"
