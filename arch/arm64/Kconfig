@@ -2169,3 +2169,11 @@ source "arch/arm64/gunyah/Kconfig"
 if CRYPTO
 source "arch/arm64/crypto/Kconfig"
 endif
+
+config TARGET_PRODUCT_ASPHALT
+	bool "Target product is asphalt"
+	default n
+
+config TARGET_PRODUCT_HALO
+	bool "Target product is halo"
+	default n
