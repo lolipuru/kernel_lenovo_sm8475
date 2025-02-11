@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# ktz8866 backlight driver configuration
+#
+
+config KTZ8866_BACKLIGHT_BKL
+	tristate "ktz8866 LCD Backlight driver for bkl"
+	depends on I2C
+	help
+	  This option enables support for the LCD backlight using
+	  bkl chip.
+
