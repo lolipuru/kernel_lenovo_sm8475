@@ -32,11 +32,23 @@ char aw_rtp_name[][AW_RTP_NAME_MAX] = {
 	{"haptic_rtp.bin"},
 	{"haptic_rtp_lighthouse.bin"},
 	{"haptic_rtp_silk.bin"},
+#ifdef CONFIG_AWINIC_8691X_HAPTIC_HV
+	{"Ding_RTP_x_23.bin"},
+	{"Dreams_RTP.bin"},
+	{"Dreams_RTP_x.bin"},
+	{"MaLing1_RTP.bin"},
+	{"MaLing1x_RTP.bin"},
+	{"Stars2_RTP.bin"},
+	{"Stars2x_RTP.bin"},
+	{"TribalLangua_RTP.bin"},
+	{"TribalLangua_RTP_x.bin"},
+#else
 	{"95_None"},
 	{"96_None"},
 	{"97_None"},
 	{"98_None"},
 	{"99_None"},
+#endif
 	//coustom
 	{"100_Haptic_Right_RTP.bin"},//double = 100
 	{"101_Haptic_Right_RTP.bin"},

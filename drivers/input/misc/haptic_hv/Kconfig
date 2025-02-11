@@ -12,5 +12,13 @@ config AWINIC_HAPTIC_HV
 	  To compile this driver as a module, choose M here: the
 	  module will be called awinic_haptic_hv.
 
-
+config CONFIG_AWINIC_8691X_HAPTIC_HV
+	tristate "CONFIG_AWINIC_8691X_HAPTIC_HV driver"
+	depends on I2C
+	help
+	  Say Y here if you have Awinic AW8691X haptic controller
+	  chip in your system.
+	  If unsure, say N.
+	  To compile this driver as a module, choose M here: the
+	  module will be called awinic_haptic_8691x_hv.
 
