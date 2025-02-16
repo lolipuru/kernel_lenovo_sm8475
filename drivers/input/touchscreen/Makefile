@@ -120,4 +120,3 @@ obj-$(CONFIG_TOUCHSCREEN_NT36XXX_I2C)	+= nt36xxx/
 obj-$(CONFIG_TOUCHSCREEN_GOODIX_BRL)	+= goodix_berlin_driver/
 obj-$(CONFIG_TOUCHSCREEN_NT36xxx_HOSTDL_SPI)   += nvt_touch_spi/
 obj-$(CONFIG_KTZ8866_BACKLIGHT_BKL)	+= ktz8866/
-obj-y          += touch_gesture_inf.o
