@@ -88,6 +88,7 @@ int checksum_cmp(const u8 *data, int size, int mode)
 		(data[size - 2] << 16) + (data[size - 1] << 24);
 	return cal_checksum == r_checksum ? 0 : 1;
 }
+EXPORT_SYMBOL_GPL(checksum_cmp);
 
 /* return 1 if all data is zero or ff
  * else return 0
@@ -148,6 +149,7 @@ void goodix_rotate_abcd2cbad(int tx, int rx, s16 *data)
 	memcpy(data, temp_buf, size * sizeof(s16));
 	kfree(temp_buf);
 }
+EXPORT_SYMBOL_GPL(goodix_rotate_abcd2cbad);
 
 /* get ic type */
 int goodix_get_ic_type(struct device_node *node)
@@ -177,3 +179,4 @@ int goodix_get_ic_type(struct device_node *node)
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(goodix_get_ic_type);

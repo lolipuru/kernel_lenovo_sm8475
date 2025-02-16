@@ -24,8 +24,7 @@
 #define SPI_TRANS_PREFIX_LEN    1
 #define REGISTER_WIDTH          4
 #define SPI_READ_DUMMY_LEN      4
-#define SPI_READ_PREFIX_LEN  \
-		(SPI_TRANS_PREFIX_LEN + REGISTER_WIDTH + SPI_READ_DUMMY_LEN)
+#define SPI_READ_PREFIX_LEN  (SPI_TRANS_PREFIX_LEN + REGISTER_WIDTH + SPI_READ_DUMMY_LEN)
 #define SPI_WRITE_PREFIX_LEN (SPI_TRANS_PREFIX_LEN + REGISTER_WIDTH)
 
 #define SPI_WRITE_FLAG  0xF0
@@ -81,7 +80,7 @@ static int goodix_spi_read_bra(struct device *dev, unsigned int addr,
 	spi_message_add_tail(&xfers, &spi_msg);
 	ret = spi_sync(spi, &spi_msg);
 	if (ret < 0) {
-		ts_err("spi transfer error:%d", ret);
+		ts_err("spi transfer error:%d",ret);
 		goto exit;
 	}
 	memcpy(data, &rx_buf[SPI_READ_PREFIX_LEN], len);
@@ -130,7 +129,7 @@ static int goodix_spi_read(struct device *dev, unsigned int addr,
 	spi_message_add_tail(&xfers, &spi_msg);
 	ret = spi_sync(spi, &spi_msg);
 	if (ret < 0) {
-		ts_err("spi transfer error:%d", ret);
+		ts_err("spi transfer error:%d",ret);
 		goto exit;
 	}
 	memcpy(data, &rx_buf[SPI_READ_PREFIX_LEN - 1], len);
@@ -159,8 +158,11 @@ static int goodix_spi_write(struct device *dev, unsigned int addr,
 	int ret = 0;
 
 	tx_buf = kzalloc(SPI_WRITE_PREFIX_LEN + len, GFP_KERNEL);
-	if (!tx_buf)
+	if (!tx_buf) {
+		ts_err("alloc tx_buf failed, size:%d",
+			SPI_WRITE_PREFIX_LEN + len);
 		return -ENOMEM;
+	}
 
 	spi_message_init(&spi_msg);
 	memset(&xfers, 0, sizeof(xfers));
@@ -170,6 +172,7 @@ static int goodix_spi_write(struct device *dev, unsigned int addr,
 	tx_buf[2] = (addr >> 16) & 0xFF;
 	tx_buf[3] = (addr >> 8) & 0xFF;
 	tx_buf[4] = addr & 0xFF;
+
 	memcpy(&tx_buf[SPI_WRITE_PREFIX_LEN], data, len);
 	xfers.tx_buf = tx_buf;
 	xfers.len = SPI_WRITE_PREFIX_LEN + len;
@@ -177,7 +180,7 @@ static int goodix_spi_write(struct device *dev, unsigned int addr,
 	spi_message_add_tail(&xfers, &spi_msg);
 	ret = spi_sync(spi, &spi_msg);
 	if (ret < 0)
-		ts_err("spi transfer error:%d", ret);
+		ts_err("spi transfer error:%d",ret);
 
 	kfree(tx_buf);
 	return ret;
@@ -196,8 +199,11 @@ static int goodix_spi_probe(struct spi_device *spi)
 	ts_info("goodix spi probe in");
 
 	/* init spi_device */
-	spi->mode          = SPI_MODE_0;
-	spi->bits_per_word = 8;
+	//spi->mode            = SPI_MODE_0;
+	//spi->mode  &= (~SPI_CS_HIGH);   //cs low
+	spi->mode  &=SPI_MODE_0;
+	
+	spi->bits_per_word   = 8;
 
 	ret = spi_setup(spi);
 	if (ret) {
@@ -234,8 +240,7 @@ static int goodix_spi_probe(struct spi_device *spi)
 	goodix_pdev->dev.platform_data = &goodix_spi_bus;
 	goodix_pdev->dev.release = goodix_pdev_release;
 
-	/*
-	 * register platform device, then the goodix_ts_core
+	/* register platform device, then the goodix_ts_core
 	 * module will probe the touch deivce.
 	 */
 	ret = platform_device_register(goodix_pdev);
@@ -263,8 +268,7 @@ static int goodix_spi_remove(struct spi_device *spi)
 static const struct of_device_id spi_matchs[] = {
 	{.compatible = "goodix,gt9897S",},
 	{.compatible = "goodix,gt9897T",},
-	{.compatible = "goodix,gt9966S",},
-	{.compatible = "goodix,gt9916S",},
+	{.compatible = "goodix,gt9966",},
 	{},
 };
 #endif
@@ -290,9 +294,15 @@ int goodix_spi_bus_init(void)
 	ts_info("Goodix spi driver init");
 	return spi_register_driver(&goodix_spi_driver);
 }
+EXPORT_SYMBOL(goodix_spi_bus_init);
 
 void goodix_spi_bus_exit(void)
 {
 	ts_info("Goodix spi driver exit");
 	spi_unregister_driver(&goodix_spi_driver);
 }
+EXPORT_SYMBOL(goodix_spi_bus_exit);
+
+MODULE_DESCRIPTION("Goodix Touchscreen Hardware Module");
+MODULE_AUTHOR("Goodix, Inc.");
+MODULE_LICENSE("GPL v2");
