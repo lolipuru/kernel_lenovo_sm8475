@@ -2371,6 +2371,7 @@ bool shmem_mapping(struct address_space *mapping)
 {
 	return mapping->a_ops == &shmem_aops;
 }
+EXPORT_SYMBOL(shmem_mapping);
 
 #ifdef CONFIG_USERFAULTFD
 int shmem_mfill_atomic_pte(struct mm_struct *dst_mm,
