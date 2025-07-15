@@ -373,6 +373,13 @@ static int parse_uac2_sample_rate_range(struct snd_usb_audio *chip,
 
 		for (rate = min; rate <= max; rate += res) {
 
+			/* Filter out invalid rates on boya bca70 */
+			if (chip->usb_id == USB_ID(0x2f05, 0x0009) &&
+			    (rate < 48000)) {
+				pr_err("boya bca70 rate < 48000, goto skip_rate!\n");
+				goto skip_rate;
+			}
+
 			/* Filter out invalid rates on Presonus Studio 1810c */
 			if (chip->usb_id == USB_ID(0x194f, 0x010c) &&
 			    !s1810c_valid_sample_rate(fp, rate))
