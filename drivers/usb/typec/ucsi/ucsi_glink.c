@@ -17,6 +17,8 @@
 #include <linux/soc/qcom/pmic_glink.h>
 #include <linux/usb/typec.h>
 #include <linux/usb/ucsi_glink.h>
+#include <linux/of_gpio.h>
+#include <linux/delay.h>
 
 #include "ucsi.h"
 
@@ -35,6 +37,7 @@
 #define UCSI_LOG_BUF_SIZE		256
 #define NUM_LOG_PAGES			10
 #define UCSI_WAIT_TIME_MS		5000
+
 
 #define ucsi_dbg(fmt, ...) \
 	do { \
@@ -103,6 +106,14 @@ struct remoteproc_ts {
 	u32	dec;
 };
 
+unsigned int cc_port_num = 0;
+int C1_d_present = 0;
+int C2_d_present = 0;
+int con_now = 0;
+EXPORT_SYMBOL(cc_port_num);
+EXPORT_SYMBOL(C1_d_present);
+EXPORT_SYMBOL(C2_d_present);
+EXPORT_SYMBOL(con_now);
 static void *ucsi_ipc_log;
 static RAW_NOTIFIER_HEAD(ucsi_glink_notifier);
 
@@ -179,6 +190,13 @@ static void ucsi_log(const char *prefix, unsigned int offset, u8 *buf,
 
 static int handle_ucsi_read_ack(struct ucsi_dev *udev, void *data, size_t len)
 {
+	//int i = 0;
+	u8 * val= (u8*)data;
+	u8 conn_partner_flag, partner_usb,con;
+	u16 change,flags;
+	int a = 0;
+	u8 conn_partner_type = 0;
+	u8 conn_power_mode =0;
 	if (len != sizeof(udev->rx_buf)) {
 		pr_err("Incorrect received length %zu expected %u\n", len,
 			sizeof(udev->rx_buf));
@@ -186,6 +204,130 @@ static int handle_ucsi_read_ack(struct ucsi_dev *udev, void *data, size_t len)
 		return -EINVAL;
 	}
 
+	change = val[29]<<8 | val[28];
+	flags= val[31]<<8 | val[30];
+	con = val[16]/2;
+	conn_partner_flag = UCSI_CONSTAT_PARTNER_FLAGS(flags);
+        if (conn_partner_flag & UCSI_CONSTAT_PARTNER_FLAG_USB)
+            partner_usb = true;
+	else
+        partner_usb = false;
+
+	 conn_partner_type = UCSI_CONSTAT_PARTNER_TYPE(flags);
+
+	 conn_power_mode = UCSI_CONSTAT_PWR_OPMODE(flags);
+
+	printk("change=0x%x,flags=0x%x,con=%d",change,flags,con);
+	printk("conn_partner_type=%d,partner_usb=%d,conn_power_mode =%d",conn_partner_type,partner_usb,conn_power_mode);
+	if(con!=0 && change!=0 && partner_usb == 1&&(conn_partner_type==1||conn_partner_type==2)&&(conn_power_mode==4||conn_power_mode==1))
+	{
+		if(con==1){
+			C1_d_present = 1;
+			printk("+++++C1 data PORT++++++++");
+				}
+		else if (con==2){
+			C2_d_present = 1;
+			printk("+++++C2 data PORT++++++++");
+				}
+		else
+			printk("++++++No data port+++++++");
+	  }else if((con!=0 && change!=0 && partner_usb == 1 && conn_partner_type==1 && conn_power_mode==3) ||
+		(con!=0 && change!=0 && partner_usb == 1 && conn_partner_type==0 && conn_power_mode==4)){
+		  //c to c connected PC
+                if(con==1){
+                        C1_d_present = 1;
+                        printk("+++++C1 data PORT++++++++");
+                                }
+                else if (con==2){
+                        C2_d_present = 1;
+                        printk("+++++C2 data PORT++++++++");
+                                }
+                else
+                        printk("++++++No data port+++++++");
+          }else if(con!=0 && change!=0 && partner_usb == 1 && conn_partner_type==4 && (conn_power_mode==3||conn_power_mode==4)){
+		if(con==1){
+			C1_d_present = 1;
+			printk("+++++C1 data PORT++++++++");
+				}
+		else if (con==2){
+			C2_d_present = 1;
+			printk("+++++C2 data PORT++++++++");
+				}
+		else
+			printk("++++++No data port+++++++");
+          }else if(con!=0 && change!=0 && partner_usb == 1 && conn_partner_type==2 && conn_power_mode==3){
+		  if(con==1){
+                        C1_d_present = 0;
+                        printk("+++++C1 C to dp PORT++++++++");
+			}
+          }else if(con!=0 && change!=0 && partner_usb == 0 && conn_partner_type==4 && conn_power_mode==3){
+		  if(con==1){
+                        C1_d_present = 0;
+                        printk("+++++C1 C to dp PORT++++++++");
+			}
+	  }else if(con!=0 && change!=0 && flags==0)
+		{
+		if(con==1 && C1_d_present==1){
+			C1_d_present=0;
+			printk("+++++C1 data PORT plug-out++++++++");
+		}
+		else if(con==2 && C2_d_present==1){
+			C2_d_present=0;
+			printk("+++++C2 data PORT plug-out++++++++");
+		}
+		else
+			printk("+++++plug-out,switch to C1 PORT++++++++");
+	 }else
+		printk("no data port change!");
+	if(C1_d_present==1 && C2_d_present==0)
+	{
+		printk("+++++C1 PORT switch++++++++"); // switch gpio88 to C1 port;
+		a = gpio_get_value(389);
+		if(a == 1){
+		gpio_set_value(389,0);
+		mdelay(10);
+		}
+		a = gpio_get_value(389);
+		printk("set gpio88,con == 1,a=%d\n",a);
+	} else if(C1_d_present==0 && C2_d_present==1)
+	{
+		printk("+++++C2 PORT switch++++++++"); // switch gpio88 to C2 port;
+		a = gpio_get_value(389);
+		if(a == 0){
+		gpio_set_value(389,1);
+		mdelay(50);
+		}
+		a = gpio_get_value(389);
+		printk("set gpio88,con == 2,a=%d\n",a);
+	} else if(C1_d_present==1 && C2_d_present==1)
+	{
+		printk("+++++C1 C2 PORT were both persist++++++++");
+		a = gpio_get_value(389);
+		if(a == 1){
+		gpio_set_value(389,0);
+		mdelay(10);
+		}
+		a = gpio_get_value(389);
+		printk("set gpio88,a=%d\n",a);
+	} else
+	{
+		printk("+++++C1 C2 PORT were not persist++++++++"); // switch gpio88 to C1 port;
+		//a = gpio_get_value(389);
+		//if(a == 1){
+		//gpio_set_value(389,0);
+		//mdelay(10);
+		//}
+		//a = gpio_get_value(389);
+		//printk("set gpio88,a=%d\n",a);
+	}
+
+
+	/* for(i=12;i<60;i++)
+	{
+ 	if(i%8 == 0)
+ 	printk("\n");
+ 	printk(" val[%d]=0x%x ",i, val[i]);
+	}*/
 	memcpy(&udev->rx_buf, data, sizeof(udev->rx_buf));
 	if (udev->rx_buf.ret_code) {
 		pr_err("ret_code: %u\n", udev->rx_buf.ret_code);
@@ -258,14 +400,16 @@ static int handle_ucsi_notify(struct ucsi_dev *udev, void *data, size_t len)
 	}
 
 	con_num = UCSI_CCI_CONNECTOR(cci);
-	pr_debug("con_num: %u num_connectors: %u\n", con_num,
+	pr_err("wcq con_num: %u num_connectors: %u\n", con_num,
 		udev->ucsi->cap.num_connectors);
-
+	cc_port_num = con_num;
 	if (con_num && con_num <= udev->ucsi->cap.num_connectors &&
 		udev->ucsi->connector) {
 		con = &udev->ucsi->connector[con_num - 1];
 		if (con && con->ucsi)
+		 {
 			ucsi_connector_change(udev->ucsi, con_num);
+		}
 	}
 	mutex_unlock(&udev->state_lock);
 
@@ -508,7 +652,7 @@ static int ucsi_qti_read(struct ucsi *ucsi, unsigned int offset,
 	struct ucsi_dev *udev = ucsi_get_drvdata(ucsi);
 	struct ucsi_read_buf_req_msg ucsi_buf = { { 0 } };
 	int rc;
-
+	u8 *P = (u8 *)val;
 	if (!validate_ucsi_msg(offset, val_len))
 		return -EINVAL;
 
@@ -549,6 +693,9 @@ static int ucsi_qti_read(struct ucsi *ucsi, unsigned int offset,
 	atomic_set(&udev->rx_valid, 0);
 	ucsi_log("read:", offset, (u8 *)val, val_len);
 	ucsi_qti_notify(udev, offset, val, val_len);
+	if(val_len == 4 && P[0] != 0)
+	con_now = P[0]/2;
+	printk("ucsi+con_now=%d",con_now);
 
 out:
 	mutex_unlock(&udev->read_lock);
