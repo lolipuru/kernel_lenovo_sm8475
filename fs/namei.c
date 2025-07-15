@@ -299,7 +299,9 @@ static int check_acl(struct inode *inode, int mask)
 static int acl_permission_check(struct inode *inode, int mask)
 {
 	unsigned int mode = inode->i_mode;
-
+        uid_t cred_userid;
+        uid_t inode_userid;
+        uid_t inode_groupid;
 	/* Are we the owner? If so, ACL's don't matter */
 	if (likely(uid_eq(current_fsuid(), inode->i_uid))) {
 		mask &= 7;
@@ -326,10 +328,27 @@ static int acl_permission_check(struct inode *inode, int mask)
 		if (in_group_p(inode->i_gid))
 			mode >>= 3;
 	}
-
+        /* multispace convert appid to uid */
+        cred_userid = __kuid_val(current_fsuid()) / 100000;
+        inode_userid = __kuid_val(inode->i_uid) / 100000;
+        inode_groupid = __kgid_val(inode->i_gid) / 100000;
+        /* multispace allow uid >= 900 to access files of uid 0 */
+        if ((cred_userid >= 900 && cred_userid <= 999) &&
+            (inode_userid == 0 ||
+            (inode_userid >= 900 && inode_userid <= 999))) {
+		return 0;
+        }
+        /* multispace allow uid 0 to access files of uid >= 900 */
+        if (cred_userid == 0 && ((inode_userid == 0 && (inode_groupid >= 900 && inode_groupid <= 999))
+            || (inode_userid >= 900 && inode_userid <= 999))) {
+                mode >>= 6;
+	        if ((mask & ~mode & (MAY_READ | MAY_WRITE | MAY_EXEC)) == 0)
+                        return 0;
+        }
 	/* Bits in 'mode' clear that we require? */
 	return (mask & ~mode) ? -EACCES : 0;
 }
+
 
 /**
  * generic_permission -  check for access rights on a Posix-like filesystem
