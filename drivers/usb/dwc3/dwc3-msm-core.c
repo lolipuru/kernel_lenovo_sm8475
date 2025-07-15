@@ -335,7 +335,13 @@ enum dp_lane {
 	DP_2_LANE = 2,
 	DP_4_LANE = 4,
 };
-
+extern int C1_d_present;
+extern int C2_d_present;
+extern int con_now ;
+enum usb_role c2_role;
+enum usb_role c1_role;
+static struct class *ot_class;
+static struct device *devc1c2;
 static const char *dwc3_drd_state_string(enum dwc3_drd_state state)
 {
 	if (state < 0 || state >= ARRAY_SIZE(state_names))
@@ -605,6 +611,7 @@ struct dwc3_msm {
 /* unfortunately, dwc3 core doesn't manage multiple dwc3 instances for trace */
 void *dwc_trace_ipc_log_ctxt;
 
+static int dwc3_start_stop_host(struct dwc3_msm *mdwc, bool start);
 static void dwc3_pwr_event_handler(struct dwc3_msm *mdwc);
 static int get_chg_type(struct dwc3_msm *mdwc);
 
@@ -4497,6 +4504,10 @@ static enum usb_role dwc3_msm_usb_role_switch_get_role(struct usb_role_switch *s
 
 static int dwc3_msm_set_role(struct dwc3_msm *mdwc, enum usb_role role)
 {
+	char *uen1[2] = {"DOU_USB=usb2port",NULL};
+	char *uen2[2] = {"DOU_USB=usb1or0port",NULL};
+	int ret=0;
+
 	enum usb_role cur_role;
 
 	if (!dwc3_msm_role_allowed(mdwc, role))
@@ -4507,6 +4518,29 @@ static int dwc3_msm_set_role(struct dwc3_msm *mdwc, enum usb_role role)
 
 	dbg_log_string("cur_role:%s new_role:%s refcnt:%d\n", usb_role_string(cur_role),
 				usb_role_string(role), mdwc->refcnt_dp_usb);
+	printk("cur_role: %s new_role: %s", usb_role_string(cur_role), usb_role_string(role));
+
+	if (con_now == 2) {
+		c2_role = role;
+	} else if (con_now == 1) {
+		c1_role = role;
+	}
+
+	if (C1_d_present == 1 && con_now == 2) {
+		role = cur_role;
+		printk("c1 is on, role = cur_role, set_role: %s", usb_role_string(role));
+	} else if (C2_d_present == 1 && C1_d_present == 0 && con_now == 1 && role == 0) {
+		role = c2_role;
+		printk("c2 is on, c1 out, role = c2_role, set_role: %s", usb_role_string(role));
+	}
+
+	if (C1_d_present == 1 && C2_d_present == 1) {
+		kobject_uevent_env(&devc1c2->kobj, KOBJ_CHANGE, uen1);
+		printk("kobject_uevent_env+++ uen1: %s", kobject_name(&devc1c2->kobj));
+	} else {
+		kobject_uevent_env(&devc1c2->kobj, KOBJ_CHANGE, uen2);
+		printk("kobject_uevent_env+++ uen2: %s", kobject_name(&devc1c2->kobj));
+	}
 
 	/*
 	 * For boot up without USB cable connected case, don't check
@@ -4514,6 +4548,15 @@ static int dwc3_msm_set_role(struct dwc3_msm *mdwc, enum usb_role role)
 	 * PHYs.
 	 */
 	if (mdwc->drd_state != DRD_STATE_UNDEFINED && cur_role == role) {
+		printk("no USB role change");
+		if (c1_role == 1 && con_now == 1 && C2_d_present == 1){
+		ret = dwc3_start_stop_host(mdwc, false);
+		if (ret){
+		printk("+++++++stop host error");
+		mutex_unlock(&mdwc->role_switch_mutex);
+			}
+		dwc3_start_stop_host(mdwc, true);
+		printk("dwc3_start_stop_host++++++++++++");}
 		dbg_log_string("no USB role change");
 		mutex_unlock(&mdwc->role_switch_mutex);
 		return 0;
@@ -5428,6 +5471,9 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 	struct resource *res;
 	int ret = 0, size = 0, i;
 	u32 val;
+	ot_class = class_create(THIS_MODULE, "douusb");
+	devc1c2 = device_create(ot_class, NULL, MKDEV(0, 0), NULL, "usbc1c2");
+	printk("devices_create usbc1c2\n");
 
 	mdwc = devm_kzalloc(&pdev->dev, sizeof(*mdwc), GFP_KERNEL);
 	if (!mdwc)
@@ -5727,6 +5773,9 @@ put_dwc3:
 		icc_put(mdwc->icc_paths[i]);
 
 err:
+	device_del(devc1c2);
+	class_destroy(ot_class);
+	printk("err:device_del(devc1c2);class_destroy(ot_class);\n");
 	destroy_workqueue(mdwc->sm_usb_wq);
 	destroy_workqueue(mdwc->dwc3_wq);
 	usb_put_redriver(mdwc->redriver);

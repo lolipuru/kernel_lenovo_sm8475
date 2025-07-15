@@ -18,6 +18,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/types.h>
 #include <linux/usb/repeater.h>
+#include <linux/usb/ucsi_glink.h>
 
 #define EUSB2_3P0_VOL_MIN			3075000 /* uV */
 #define EUSB2_3P0_VOL_MAX			3300000 /* uV */
@@ -67,6 +68,7 @@
 #define INT_STATUS_1			0xA3
 #define INT_STATUS_2			0xA4
 
+
 enum eusb2_repeater_type {
 	TI_REPEATER,
 	NXP_REPEATER,
@@ -87,10 +89,12 @@ struct eusb2_repeater {
 	bool				power_enabled;
 
 	struct gpio_desc		*reset_gpiod;
-	u32				*param_override_seq;
-	u8				param_override_seq_cnt;
+	u32				*param_override_seq_c1;
+	u8				param_override_seq_cnt_c1;
+	u32                             *param_override_seq_c2;
+	u8                              param_override_seq_cnt_c2;
 };
-
+extern int C1_d_present;
 static const struct regmap_config eusb2_i2c_regmap = {
 	.reg_bits = 8,
 	.val_bits = 8,
@@ -263,11 +267,19 @@ static int eusb2_repeater_init(struct usb_repeater *ur)
 	}
 
 	dev_info(er->ur.dev, "eUSB2 repeater version = 0x%x ur->flags:0x%x\n", reg_val, ur->flags);
-
-	/* override init sequence using devicetree based values */
-	if (er->param_override_seq_cnt)
-		eusb2_repeater_update_seq(er, er->param_override_seq,
-					er->param_override_seq_cnt);
+	if (C1_d_present) {
+		/* override init sequence using devicetree based values */
+		dev_info(er->ur.dev, "write C1 sequence\n");
+		if (er->param_override_seq_cnt_c1)
+			eusb2_repeater_update_seq(er, er->param_override_seq_c1,
+						er->param_override_seq_cnt_c1);
+	}else {
+		/* override init sequence using devicetree based values */
+		dev_info(er->ur.dev, "write C2 sequence\n");
+		if (er->param_override_seq_cnt_c2)
+			eusb2_repeater_update_seq(er, er->param_override_seq_c2,
+						er->param_override_seq_cnt_c2);
+	}
 
 	dev_info(er->ur.dev, "eUSB2 repeater init\n");
 
@@ -376,34 +388,63 @@ static int eusb2_repeater_i2c_probe(struct i2c_client *client)
 		goto err_probe;
 	}
 
-	num_elem = of_property_count_elems_of_size(dev->of_node, "qcom,param-override-seq",
-				sizeof(*er->param_override_seq));
+	num_elem = of_property_count_elems_of_size(dev->of_node, "qcom,param-override-seq-c1",
+				sizeof(*er->param_override_seq_c1));
 	if (num_elem > 0) {
 		if (num_elem % 2) {
-			dev_err(dev, "invalid param_override_seq_len\n");
+			dev_err(dev, "invalid param_override_seq_len_c1\n");
 			ret = -EINVAL;
 			goto err_probe;
 		}
-
-		er->param_override_seq_cnt = num_elem;
-		er->param_override_seq = devm_kcalloc(dev,
-				er->param_override_seq_cnt,
-				sizeof(*er->param_override_seq), GFP_KERNEL);
-		if (!er->param_override_seq) {
+		dev_info(dev, "get c1 param override seq from dtsi\n");
+		er->param_override_seq_cnt_c1 = num_elem;
+		er->param_override_seq_c1 = devm_kcalloc(dev,
+				er->param_override_seq_cnt_c1,
+				sizeof(*er->param_override_seq_c1), GFP_KERNEL);
+		if (!er->param_override_seq_c1) {
 			ret = -ENOMEM;
 			goto err_probe;
 		}
 
 		ret = of_property_read_u32_array(dev->of_node,
-				"qcom,param-override-seq",
-				er->param_override_seq,
-				er->param_override_seq_cnt);
+				"qcom,param-override-seq-c1",
+				er->param_override_seq_c1,
+				er->param_override_seq_cnt_c1);
 		if (ret) {
-			dev_err(dev, "qcom,param-override-seq read failed %d\n",
+			dev_err(dev, "qcom,param-override-seq-c1 read failed %d\n",
 									ret);
 			goto err_probe;
 		}
 	}
+
+	num_elem = of_property_count_elems_of_size(dev->of_node, "qcom,param-override-seq-c2",
+                                sizeof(*er->param_override_seq_c2));
+        if (num_elem > 0) {
+                if (num_elem % 2) {
+                        dev_err(dev, "invalid param_override_seq_len_c2\n");
+                        ret = -EINVAL;
+                        goto err_probe;
+                }
+		dev_info(dev, "get c2 param override seq from dtsi\n");
+                er->param_override_seq_cnt_c2 = num_elem;
+                er->param_override_seq_c2 = devm_kcalloc(dev,
+                                er->param_override_seq_cnt_c2,
+                                sizeof(*er->param_override_seq_c2), GFP_KERNEL);
+                if (!er->param_override_seq_c2) {
+                        ret = -ENOMEM;
+                        goto err_probe;
+                }
+
+                ret = of_property_read_u32_array(dev->of_node,
+                                "qcom,param-override-seq-c2",
+                                er->param_override_seq_c2,
+                                er->param_override_seq_cnt_c2);
+                if (ret) {
+                        dev_err(dev, "qcom,param-override-seq-c2 read failed %d\n",
+                                                                        ret);
+                        goto err_probe;
+                }
+        }
 
 
 	er->ur.dev = dev;
