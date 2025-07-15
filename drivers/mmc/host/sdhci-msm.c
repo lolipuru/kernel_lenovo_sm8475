@@ -32,6 +32,7 @@
 #include "../core/core.h"
 #include <linux/crypto-qti-common.h>
 #include <linux/qtee_shmbridge.h>
+#include <linux/mmc/slot-gpio.h>
 
 #if IS_ENABLED(CONFIG_MMC_SDHCI_MSM_SCALING)
 #include "sdhci-msm-scaling.h"
@@ -4532,6 +4533,46 @@ static int sdhci_msm_init_sysfs(struct device *dev)
 
 	return ret;
 }
+static struct sdhci_host *card_host = NULL;
+static struct kobject *card_slot_device;
+static ssize_t card_slot_status_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", mmc_gpio_get_cd(card_host->mmc));
+}
+
+static struct kobj_attribute card_slot_status_attribute =
+        __ATTR(card_slot_status, 0444, card_slot_status_show, NULL);
+
+static struct attribute *sdcard_sysfs_attrs[] = {
+        &card_slot_status_attribute.attr,
+        NULL
+};
+
+static const struct attribute_group sdcard_attr_group = {
+        .attrs = sdcard_sysfs_attrs,
+};
+
+static int sdcard_init_sysfs(void)
+{
+	int32_t error = 0;
+
+	if(card_slot_device != NULL){
+		pr_err("card_slot already created\n");
+		return 0;
+	}
+	card_slot_device = kobject_create_and_add("card_slot", NULL);
+	if (card_slot_device == NULL) {
+		printk("%s: card_slot register failed\n", __func__);
+		error = -ENOMEM;
+		return error ;
+	}
+        error = sysfs_create_group(card_slot_device, &sdcard_attr_group);
+        if (error){
+                pr_err("%s: Failed to create sdcard group (err = %d)\n", __func__, error);
+		kobject_del(card_slot_device);
+	}
+        return error;
+}
 
 static ssize_t show_sdhci_msm_clk_gating(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -4707,6 +4748,8 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 	msm_host->pdev = pdev;
 
 	sdhci_msm_init_sysfs(dev);
+	card_host = dev_get_drvdata(dev);
+	sdcard_init_sysfs();
 #if defined(CONFIG_SDHCI_MSM_DBG)
 	msm_host->dbg_en = true;
 #endif
