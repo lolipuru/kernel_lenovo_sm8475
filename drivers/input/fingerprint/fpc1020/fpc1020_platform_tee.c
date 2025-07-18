@@ -35,15 +35,6 @@
 #include <linux/of_gpio.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
- 
-// #include "ontim/ontim_dev_dgb.h"
-/*
-#define FPC_HW_INFO "FPC1151"
-DEV_ATTR_DECLARE(fingersensor)
-DEV_ATTR_DEFINE("vendor", FPC_HW_INFO)
-DEV_ATTR_DECLARE_END;
-ONTIM_DEBUG_DECLARE_AND_INIT(fingersensor, fingersensor, 8);
-*/
 
 #define FPC_TTW_HOLD_TIME 1000
 
@@ -99,7 +90,9 @@ struct fpc1020_data {
     struct mutex lock; /* To set/get exported values in sysfs */
     bool prepared;
     atomic_t wakeup_enabled; /* Used both in ISR and non-ISR */
+    bool offlock_enabled;
 };
+static irqreturn_t fpc1020_irq_handler(int irq, void *handle);
 #if 0
 static int vreg_setup(struct fpc1020_data *fpc1020, const char *name,
         bool enable)
@@ -415,7 +408,20 @@ static ssize_t wakeup_enable_set(struct device *dev,
 
     return ret;
 }
-static DEVICE_ATTR(wakeup_enable, S_IWUSR, NULL, wakeup_enable_set);
+static ssize_t wakeup_enable_get(struct device *dev,
+	struct device_attribute *attr,
+	char *buf)
+{
+	struct fpc1020_data *fpc1020 = dev_get_drvdata(dev);
+	
+	if (atomic_read(&fpc1020->wakeup_enabled))
+		return snprintf(buf, PAGE_SIZE, "%s", "true");
+	else 
+		return snprintf(buf, PAGE_SIZE, "%s", "false");
+
+}
+
+static DEVICE_ATTR(wakeup_enable, S_IRUSR | S_IWUSR, wakeup_enable_get, wakeup_enable_set);
 
 /**
  * sysfs node for controlling the wakelock.
@@ -452,6 +458,33 @@ static ssize_t handle_wakelock_cmd(struct device *dev,
 }
 static DEVICE_ATTR(handle_wakelock, S_IWUSR, NULL, handle_wakelock_cmd);
 
+static ssize_t offlock_enable_get(struct device *dev,
+                                   struct device_attribute *attr,
+                                   char *buf)
+{
+    struct fpc1020_data *fpc1020 = dev_get_drvdata(dev);
+    
+    if (fpc1020->offlock_enabled)
+        return snprintf(buf, PAGE_SIZE, "1");
+    else 
+        return snprintf(buf, PAGE_SIZE, "0");
+}
+static ssize_t offlock_enable_set(struct device *dev,
+                                   struct device_attribute *attr,
+                                   const char *buf, size_t count)
+{
+    struct fpc1020_data *fpc1020 = dev_get_drvdata(dev);
+
+    dev_err(dev, "offlock_set %s.\n", buf);
+
+    mutex_lock(&fpc1020->lock);
+    fpc1020->offlock_enabled = (buf[0] == '1');
+    mutex_unlock(&fpc1020->lock);
+
+    return count;
+}
+static DEVICE_ATTR(offlock_enable, S_IRUSR | S_IWUSR, offlock_enable_get, offlock_enable_set);
+
 /**
  * sysf node to check the interrupt status of the sensor, the interrupt
  * handler should perform sysf_notify to allow userland to poll the node.
@@ -482,6 +515,103 @@ static ssize_t irq_ack(struct device *dev,
 }
 static DEVICE_ATTR(irq, S_IRUSR | S_IWUSR, irq_get, irq_ack);
 
+static ssize_t compatible_all_set(struct device *dev,
+                                     struct device_attribute *attr,
+                                     const char *buf, size_t count)
+{
+    struct fpc1020_data *fpc1020 = dev_get_drvdata(dev);
+    int irq, rc;
+    bool enable = false;
+
+    if (strncmp(buf, "enable", strlen("enable")) == 0) {
+        if (atomic_read(&fpc1020->wakeup_enabled))
+            return count;
+
+        enable = true;
+    } else if (strncmp(buf, "disable", strlen("disable")) == 0) {
+        if (!atomic_read(&fpc1020->wakeup_enabled))
+            return count;
+
+        enable = false;
+    } else {
+        return -EINVAL;
+    }
+
+    if (!enable) {
+        if (fpc1020->irq_gpio < 200)
+            devm_gpio_free(fpc1020->dev, fpc1020->irq_gpio);
+        if (fpc1020->rst_gpio < 200)
+            devm_gpio_free(fpc1020->dev, fpc1020->rst_gpio);
+
+        irq = gpio_to_irq(fpc1020->irq_gpio);
+        devm_free_irq(fpc1020->dev, irq, fpc1020);
+        atomic_set(&fpc1020->wakeup_enabled, 0);
+        return count;
+    }
+
+    rc = devm_gpio_request(fpc1020->dev, fpc1020->irq_gpio, "fpc,gpio_irq");
+    if (rc) {
+        dev_err(fpc1020->dev, "failed to request fpc,gpio_irq\n");
+        return rc;
+    }
+
+    rc = devm_gpio_request(fpc1020->dev, fpc1020->rst_gpio, "fpc,gpio_rst");
+    if (rc) {
+        dev_err(fpc1020->dev, "failed to request fpc,gpio_rst\n");
+        return rc;
+    }
+
+    rc = devm_gpio_request(fpc1020->dev, fpc1020->vdd_gpio, "fpc,gpio_pwr");
+    if (rc) {
+        dev_err(fpc1020->dev, "failed to request fpc,gpio_pwr\n");
+        return rc;
+    }
+
+    rc = select_pin_ctl(fpc1020, "fpc1020_reset_reset");
+    if (rc) {
+        return rc;
+    }
+
+    rc = select_pin_ctl(fpc1020, "fpc1020_irq_active");
+    if (rc) {
+        return rc;
+    }
+
+    if (of_find_property(dev->of_node, "fpc,enable-wakeup", NULL)) {
+        device_init_wakeup(dev, true);
+        dev_info(dev, "fpc enable-wakeup done!\n");
+    }
+
+    irq = gpio_to_irq(fpc1020->irq_gpio);
+    rc = devm_request_threaded_irq(fpc1020->dev, irq, NULL,
+                                   fpc1020_irq_handler,
+                                   IRQF_TRIGGER_RISING | IRQF_ONESHOT,
+                                   dev_name(dev), fpc1020);
+    if (rc) {
+        dev_err(fpc1020->dev, "could not request irq %d\n", irq);
+        return rc;
+    }
+
+    irq_set_irq_wake(irq, 1);
+    atomic_set(&fpc1020->wakeup_enabled, 1);
+
+    if (of_find_property(dev->of_node, "fpc,enable-on-boot", NULL)) {
+        dev_info(dev, "Enabling hardware\n");
+        mutex_lock(&fpc1020->lock);
+        if (!fpc1020->prepared) {
+            fpc1020->prepared = true;
+            select_pin_ctl(fpc1020, "fpc1020_reset_reset");
+            usleep_range(100, 1000);
+            select_pin_ctl(fpc1020, "fpc1020_reset_active");
+        }
+        mutex_unlock(&fpc1020->lock);
+    }
+
+    hw_reset(fpc1020);
+    return count;
+}
+static DEVICE_ATTR(compatible_all, S_IWUSR, NULL, compatible_all_set);
+
 static struct attribute *attributes[] = {
     &dev_attr_pinctl_set.attr,
     &dev_attr_device_prepare.attr,
@@ -491,6 +621,8 @@ static struct attribute *attributes[] = {
     &dev_attr_handle_wakelock.attr,
     &dev_attr_clk_enable.attr,
     &dev_attr_irq.attr,
+    &dev_attr_compatible_all.attr,
+    &dev_attr_offlock_enable.attr,
     NULL
 };
 
@@ -654,9 +786,6 @@ static int fpc1020_probe(struct platform_device *pdev)
     }
 
     rc = hw_reset(fpc1020);
-    //add by fanxzh for fpc hw_info
-    //REGISTER_AND_INIT_ONTIM_DEBUG_FOR_THIS_DEV();
-
     dev_info(dev, "%s: ok\n", __func__);
 
 exit:
