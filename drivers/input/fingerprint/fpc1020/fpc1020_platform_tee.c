@@ -35,14 +35,15 @@
 #include <linux/of_gpio.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
-#include "fpc_wakelock.h"
-
-#include "ontim/ontim_dev_dgb.h"
+ 
+// #include "ontim/ontim_dev_dgb.h"
+/*
 #define FPC_HW_INFO "FPC1151"
 DEV_ATTR_DECLARE(fingersensor)
 DEV_ATTR_DEFINE("vendor", FPC_HW_INFO)
 DEV_ATTR_DECLARE_END;
 ONTIM_DEBUG_DECLARE_AND_INIT(fingersensor, fingersensor, 8);
+*/
 
 #define FPC_TTW_HOLD_TIME 1000
 
@@ -74,7 +75,7 @@ struct vreg_config {
     int ua_load;
 };
 
-static const struct vreg_config const vreg_conf[] = {
+static const struct vreg_config vreg_conf[] __maybe_unused = {
     { "vdd_ana", 1800000UL, 1800000UL, 6000, },
     { "vcc_spi", 1800000UL, 1800000UL, 10, },
     { "vdd_io", 1800000UL, 1800000UL, 6000, },
@@ -87,7 +88,7 @@ struct fpc1020_data {
     struct pinctrl_state *pinctrl_state[ARRAY_SIZE(pctl_names)];
     struct regulator *vreg[ARRAY_SIZE(vreg_conf)];
 
-    struct wake_lock ttw_wl;
+    struct wakeup_source *ttw_wl;
     int irq_gpio;
     int rst_gpio;
     int vdd_gpio;
@@ -322,7 +323,7 @@ static DEVICE_ATTR(hw_reset, S_IWUSR, NULL, hw_reset_set);
  */
 static int device_prepare(struct fpc1020_data *fpc1020, bool enable)
 {
-    int rc;
+    int rc = 0;
 
     mutex_lock(&fpc1020->lock);
     if (enable && !fpc1020->prepared) {
@@ -430,7 +431,7 @@ static ssize_t handle_wakelock_cmd(struct device *dev,
                 min(count, strlen(RELEASE_WAKELOCK_W_V)))) {
         if (fpc1020->nbr_irqs_received_counter_start ==
                 fpc1020->nbr_irqs_received) {
-            wake_unlock(&fpc1020->ttw_wl);
+            __pm_relax(fpc1020->ttw_wl);
         } else {
             dev_dbg(dev, "Ignore releasing of wakelock %d != %d",
                     fpc1020->nbr_irqs_received_counter_start,
@@ -438,7 +439,7 @@ static ssize_t handle_wakelock_cmd(struct device *dev,
         }
     } else if (!strncmp(buf, RELEASE_WAKELOCK, min(count,
                     strlen(RELEASE_WAKELOCK)))) {
-        wake_unlock(&fpc1020->ttw_wl);
+        __pm_relax(fpc1020->ttw_wl);
     } else if (!strncmp(buf, START_IRQS_RECEIVED_CNT,
                 min(count, strlen(START_IRQS_RECEIVED_CNT)))) {
         fpc1020->nbr_irqs_received_counter_start =
@@ -506,8 +507,8 @@ static irqreturn_t fpc1020_irq_handler(int irq, void *handle)
     mutex_lock(&fpc1020->lock);
     if (atomic_read(&fpc1020->wakeup_enabled)) {
         fpc1020->nbr_irqs_received++;
-        wake_lock_timeout(&fpc1020->ttw_wl,
-                msecs_to_jiffies(FPC_TTW_HOLD_TIME));
+    pm_wakeup_ws_event(fpc1020->ttw_wl, FPC_TTW_HOLD_TIME, false);
+    __pm_relax(fpc1020->ttw_wl);
     }
     mutex_unlock(&fpc1020->lock);
 
@@ -637,7 +638,9 @@ static int fpc1020_probe(struct platform_device *pdev)
     /* Request that the interrupt should be wakeable */
     enable_irq_wake(gpio_to_irq(fpc1020->irq_gpio));
 
-    wake_lock_init(&fpc1020->ttw_wl, WAKE_LOCK_SUSPEND, "fpc_ttw_wl");
+    fpc1020->ttw_wl = wakeup_source_register(fpc1020->dev, "fpc_ttw_wl");
+    if (!fpc1020->ttw_wl)
+        return -ENOMEM;
 
     rc = sysfs_create_group(&dev->kobj, &attribute_group);
     if (rc) {
@@ -652,7 +655,7 @@ static int fpc1020_probe(struct platform_device *pdev)
 
     rc = hw_reset(fpc1020);
     //add by fanxzh for fpc hw_info
-    REGISTER_AND_INIT_ONTIM_DEBUG_FOR_THIS_DEV();
+    //REGISTER_AND_INIT_ONTIM_DEBUG_FOR_THIS_DEV();
 
     dev_info(dev, "%s: ok\n", __func__);
 
@@ -666,7 +669,8 @@ static int fpc1020_remove(struct platform_device *pdev)
 
     sysfs_remove_group(&pdev->dev.kobj, &attribute_group);
     mutex_destroy(&fpc1020->lock);
-    wake_lock_destroy(&fpc1020->ttw_wl);
+    wakeup_source_unregister(fpc1020->ttw_wl);
+    fpc1020->ttw_wl = NULL;
     /*  (void)vreg_setup(fpc1020, "vdd_ana", false);
         (void)vreg_setup(fpc1020, "vdd_io", false);
         (void)vreg_setup(fpc1020, "vcc_spi", false);
