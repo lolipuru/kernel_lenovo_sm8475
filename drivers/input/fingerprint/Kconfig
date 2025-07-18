@@ -12,3 +12,8 @@ config FINGERPRINT_GOODIX
 	help
 	add support for goodix fingerprint driver.
 
+config FPC1020_FINGERPRINT
+	tristate "generic fpc fingerprint driver"
+	default n 
+	help
+	add support for fpc fingerprint driver.
