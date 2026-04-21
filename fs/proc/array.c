@@ -492,7 +492,7 @@ static int do_task_stat(struct seq_file *m, struct pid_namespace *ns,
 		rsslim = READ_ONCE(sig->rlim[RLIMIT_RSS].rlim_cur);
 
 		sid = task_session_nr_ns(task, ns);
-		ppid = task_tgid_nr_ns(task->real_parent, ns);
+		ppid = task_ppid_nr_ns(task, ns);
 		pgid = task_pgrp_nr_ns(task, ns);
 
 		unlock_task_sighand(task, &flags);
@@ -512,18 +512,18 @@ static int do_task_stat(struct seq_file *m, struct pid_namespace *ns,
 		cgtime = sig->cgtime;
 
 		if (whole) {
-			struct task_struct *t = task;
+			struct task_struct *t;
 
 			min_flt = sig->min_flt;
 			maj_flt = sig->maj_flt;
 			gtime = sig->gtime;
 
 			rcu_read_lock();
-			do {
+			__for_each_thread(sig, t) {
 				min_flt += t->min_flt;
 				maj_flt += t->maj_flt;
 				gtime += task_gtime(t);
-			} while_each_thread(task, t);
+			}
 			rcu_read_unlock();
 
 			thread_group_cputime_adjusted(task, &utime, &stime);
