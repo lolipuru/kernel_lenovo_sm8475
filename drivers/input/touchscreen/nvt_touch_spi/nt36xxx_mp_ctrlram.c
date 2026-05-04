@@ -1927,10 +1927,18 @@ static int32_t nvt_selftest_open(struct inode *inode, struct file *file)
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
 
 	//---Download MP FW---
-	if (nvt_update_firmware(MP_UPDATE_FIRMWARE_NAME) < 0) {
-		mutex_unlock(&ts->lock);
-		NVT_ERR("update mp firmware failed!\n");
-		return -EAGAIN;
+	if (ts->detect_ultra_tp) {
+		if (nvt_update_firmware(MP_UPDATE_ULTRA_FIRMWARE_NAME) < 0) {
+			mutex_unlock(&ts->lock);
+			NVT_ERR("update ultra mp firmware failed!\n");
+			return -EAGAIN;
+		}
+	} else {
+		if (nvt_update_firmware(MP_UPDATE_FIRMWARE_NAME) < 0) {
+			mutex_unlock(&ts->lock);
+			NVT_ERR("update mp firmware failed!\n");
+			return -EAGAIN;
+		}
 	}
 
 	if (nvt_get_fw_info()) {
@@ -1956,7 +1964,11 @@ static int32_t nvt_selftest_open(struct inode *inode, struct file *file)
 
 		if (nvt_mp_parse_dt(np, mpcriteria)) {
 			//---Download Normal FW---
-			nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME);
+			if (ts->detect_ultra_tp) {
+				nvt_update_firmware(BOOT_UPDATE_ULTRA_FIRMWARE_NAME);
+			} else {
+				nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME);
+			}
 			mutex_unlock(&ts->lock);
 			NVT_ERR("mp parse device tree failed!\n");
 			return -EINVAL;
@@ -2121,8 +2133,11 @@ static int32_t nvt_selftest_open(struct inode *inode, struct file *file)
 	}
 
 	//---Download Normal FW---
-	nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME);
-
+	if (ts->detect_ultra_tp) {
+		nvt_update_firmware(BOOT_UPDATE_ULTRA_FIRMWARE_NAME);
+	} else {
+		nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME);
+	}
 	mutex_unlock(&ts->lock);
 
 	NVT_LOG("--\n");

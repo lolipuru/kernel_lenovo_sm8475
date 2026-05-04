@@ -410,7 +410,11 @@ return:
 *******************************************************/
 static int32_t c_fw_version_show(struct seq_file *m, void *v)
 {
-	seq_printf(m, "[Vendor]%s, [FW]0x%02X, [IC]%s\n", "CSOT",ts->fw_ver, "nt36523n");
+	if (ts->detect_ultra_tp) {
+		seq_printf(m, "[Vendor]%s, [FW]0x%02X, [IC]%s\n", "CORNING",ts->fw_ver, "nt36523n");
+	} else {
+		seq_printf(m, "[Vendor]%s, [FW]0x%02X, [IC]%s\n", "CSOT",ts->fw_ver, "nt36523n");
+	}
 	return 0;
 }
 
@@ -1353,7 +1357,11 @@ static ssize_t nvt_fw_reflash_store(struct file *file, const char *buffer, size_
 
 	if(value == 1) {
 		request_and_download_normal_complete = false;
-		update_firmware_release(BOOT_UPDATE_FIRMWARE_NAME);
+		if (ts->detect_ultra_tp) {
+			update_firmware_release(BOOT_UPDATE_ULTRA_FIRMWARE_NAME);
+		} else {
+			update_firmware_release(BOOT_UPDATE_FIRMWARE_NAME);
+		}
 	}
 
 	return count;

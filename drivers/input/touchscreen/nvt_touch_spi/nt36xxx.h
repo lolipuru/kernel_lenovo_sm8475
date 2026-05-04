@@ -117,6 +117,8 @@ extern const uint16_t gesture_key_array[];
 #define BOOT_UPDATE_FIRMWARE 1
 #define BOOT_UPDATE_FIRMWARE_NAME "novatek_ts_fw.bin"
 #define MP_UPDATE_FIRMWARE_NAME   "novatek_ts_mp.bin"
+#define BOOT_UPDATE_ULTRA_FIRMWARE_NAME "novatek_ts_ultra_fw.bin"
+#define MP_UPDATE_ULTRA_FIRMWARE_NAME   "novatek_ts_ultra_mp.bin"
 
 #define NVT_SUPER_RESOLUTION_N 10
 #if NVT_SUPER_RESOLUTION_N
@@ -150,7 +152,6 @@ extern const uint16_t gesture_key_array[];
 #define NVT_FLASH_END_FLAG_LEN 3
 #define NVT_FLASH_END_FLAG_ADDR (fw_need_write_size - NVT_FLASH_END_FLAG_LEN)
 #endif
-
 #if NVT_CUST_PROC_CMD
 struct edge_grid_zone_info {
     uint8_t degree;
@@ -166,6 +167,7 @@ struct nvt_ts_data {
 	struct delayed_work nvt_fwu_work;
 	uint16_t addr;
 	int8_t phys[32];
+	uint8_t detect_ultra_tp;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0)
 #if defined(CONFIG_DRM_PANEL)
 	struct notifier_block drm_panel_notif;

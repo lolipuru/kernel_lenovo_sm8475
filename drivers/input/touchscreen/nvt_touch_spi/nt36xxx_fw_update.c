@@ -301,18 +301,33 @@ return:
 *******************************************************/
 void update_firmware_release(char *firmware_name)
 {
-	if ((request_and_download_normal_complete == false) && (!strcmp(firmware_name, BOOT_UPDATE_FIRMWARE_NAME))) {
-		if (!IS_ERR_OR_NULL(fw_entry_normal)) {
-			release_firmware(fw_entry_normal);
-			fw_entry_normal = NULL;
+	if (ts->detect_ultra_tp) {
+		if ((request_and_download_normal_complete == false) && (!strcmp(firmware_name, BOOT_UPDATE_ULTRA_FIRMWARE_NAME))) {
+			if (!IS_ERR_OR_NULL(fw_entry_normal)) {
+				release_firmware(fw_entry_normal);
+				fw_entry_normal = NULL;
+			}
 		}
-	}
-	if (!strcmp(firmware_name, MP_UPDATE_FIRMWARE_NAME)) {
-		if (fw_entry) {
-			release_firmware(fw_entry);
-		}
+		if (!strcmp(firmware_name, MP_UPDATE_ULTRA_FIRMWARE_NAME)) {
+			if (fw_entry) {
+				release_firmware(fw_entry);
+			}
 
-		fw_entry = NULL;
+			fw_entry = NULL;
+		}
+	} else {
+		if ((request_and_download_normal_complete == false) && (!strcmp(firmware_name, BOOT_UPDATE_FIRMWARE_NAME))) {
+			if (!IS_ERR_OR_NULL(fw_entry_normal)) {
+				release_firmware(fw_entry_normal);
+				fw_entry_normal = NULL;
+			}
+		}
+		if (!strcmp(firmware_name, MP_UPDATE_FIRMWARE_NAME)) {
+			if (fw_entry) {
+				release_firmware(fw_entry);
+			}
+			fw_entry = NULL;
+		}
 	}
 }
 
@@ -323,7 +338,7 @@ Description:
 return:
 	Executive outcomes. 0---succeed. -1,-22---failed.
 *******************************************************/
-static int32_t update_firmware_request(char *filename)
+static int32_t update_normal_firmware_request(char *filename)
 {
 	uint8_t retry = 0;
 	int32_t ret = 0;
@@ -334,14 +349,14 @@ static int32_t update_firmware_request(char *filename)
 
 	while (1) {
 		NVT_LOG("filename is %s\n", filename);
-		
-		if ((strcmp(filename, BOOT_UPDATE_FIRMWARE_NAME)) && (strcmp(filename, MP_UPDATE_FIRMWARE_NAME))) {
-			NVT_ERR("filename %s not support\n", filename);
-			ret = -EINVAL;
-			goto request_fail;
+		if ((!strcmp(filename, BOOT_UPDATE_FIRMWARE_NAME)) && (!strcmp(filename, MP_UPDATE_FIRMWARE_NAME))) {
+				NVT_ERR("filename %s not support\n", filename);
+				ret = -EINVAL;
+				goto request_fail;
 		}
 
 		/*request NORMAL firmware on the first time. */
+
 		if ((request_and_download_normal_complete == false) && (!strcmp(filename, BOOT_UPDATE_FIRMWARE_NAME))) {
 			NVT_LOG("request normal firmware\n");
 			ret = request_firmware(&fw_entry_normal, filename, &ts->client->dev);
@@ -408,6 +423,90 @@ request_fail:
 	return ret;
 }
 
+static int32_t update_ultra_firmware_request(char *filename)
+{
+	uint8_t retry = 0;
+	int32_t ret = 0;
+
+	if (NULL == filename) {
+		return -ENOENT;
+	}
+
+	while (1) {
+		NVT_LOG("filename is %s\n", filename);
+		if ((!strcmp(filename, BOOT_UPDATE_ULTRA_FIRMWARE_NAME)) && (!strcmp(filename, MP_UPDATE_ULTRA_FIRMWARE_NAME))) {
+				NVT_ERR("filename %s not support\n", filename);
+				ret = -EINVAL;
+				goto request_fail;
+		}
+
+		/*request NORMAL firmware on the first time. */
+
+		if ((request_and_download_normal_complete == false) && (!strcmp(filename, BOOT_UPDATE_ULTRA_FIRMWARE_NAME))) {
+			NVT_LOG("request normal firmware\n");
+			ret = request_firmware(&fw_entry_normal, filename, &ts->client->dev);
+			if (ret) {
+				NVT_LOG("request normal firmwaer failed\n");
+				goto request_fail;
+			}
+		}
+		if (!strcmp(filename, MP_UPDATE_ULTRA_FIRMWARE_NAME)) {
+			ret = request_firmware(&fw_entry, filename, &ts->client->dev);
+			if (ret) {
+				NVT_ERR("firmware load failed, ret=%d\n", ret);
+				goto request_fail;
+			}
+		}
+
+		/*choice backup firmware data*/
+		if (!strcmp(filename, BOOT_UPDATE_ULTRA_FIRMWARE_NAME)) {
+			fw_entry = fw_entry_normal;
+			if (request_and_download_normal_complete) {
+				NVT_LOG("use backup tp fw\n");
+			}
+		}
+
+		// check FW need to write size
+		if (nvt_get_fw_need_write_size(fw_entry)) {
+			NVT_ERR("get fw need to write size fail!\n");
+			ret = -EINVAL;
+			goto invalid;
+		}
+
+		// check if FW version add FW version bar equals 0xFF
+		if (*(fw_entry->data + FW_BIN_VER_OFFSET) + *(fw_entry->data + FW_BIN_VER_BAR_OFFSET) != 0xFF) {
+			NVT_ERR("bin file FW_VER + FW_VER_BAR should be 0xFF!\n");
+			NVT_ERR("FW_VER=0x%02X, FW_VER_BAR=0x%02X\n", *(fw_entry->data+FW_BIN_VER_OFFSET), *(fw_entry->data+FW_BIN_VER_BAR_OFFSET));
+			ret = -ENOEXEC;
+			goto invalid;
+		}
+
+		/* BIN Header Parser */
+		ret = nvt_bin_header_parser(fw_entry->data, fw_entry->size);
+		if (ret) {
+			NVT_ERR("bin header parser failed\n");
+			goto invalid;
+		} else {
+			break;
+		}
+
+invalid:
+		update_firmware_release(filename);
+		if (!IS_ERR_OR_NULL(bin_map)) {
+			kfree(bin_map);
+			bin_map = NULL;
+		}
+
+request_fail:
+		retry++;
+		if(unlikely(retry > 2)) {
+			NVT_ERR("error, retry=%d\n", retry);
+			break;
+		}
+	}
+
+	return ret;
+}
 /*******************************************************
 Description:
 	Novatek touchscreen write data to sram function.
@@ -883,7 +982,11 @@ int32_t nvt_update_firmware(char *firmware_name)
 	int32_t ret = 0;
 
 	// request bin file in "/etc/firmware"
-	ret = update_firmware_request(firmware_name);
+	if (ts->detect_ultra_tp) {
+		ret = update_ultra_firmware_request(firmware_name);
+	} else {
+		ret = update_normal_firmware_request(firmware_name);
+	}
 	if (ret) {
 		NVT_ERR("update_firmware_request failed. (%d)\n", ret);
 		goto request_firmware_fail;
@@ -915,7 +1018,7 @@ int32_t nvt_update_firmware(char *firmware_name)
 		NVT_ERR("nvt_get_fw_info failed. (%d)\n", ret);
 	}
 
-	if (!strcmp(firmware_name, BOOT_UPDATE_FIRMWARE_NAME)) {
+	if ((!strcmp(firmware_name, BOOT_UPDATE_FIRMWARE_NAME)) && (!strcmp(firmware_name, BOOT_UPDATE_ULTRA_FIRMWARE_NAME))) {
 		request_and_download_normal_complete =true;
 	}
 
@@ -942,7 +1045,11 @@ return:
 void Boot_Update_Firmware(struct work_struct *work)
 {
 	mutex_lock(&ts->lock);
-	nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME);
+	if (ts->detect_ultra_tp) {
+		nvt_update_firmware(BOOT_UPDATE_ULTRA_FIRMWARE_NAME);
+	} else {
+		nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME);
+	}
 	mutex_unlock(&ts->lock);
 #if NVT_SUPPORT_PEN
 	if(ts->probe_state == 1){

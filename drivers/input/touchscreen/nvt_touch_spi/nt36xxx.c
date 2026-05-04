@@ -84,7 +84,6 @@ uint8_t esd_retry = 0;
 extern int32_t nvt_extra_proc_init(void);
 extern void nvt_extra_proc_deinit(void);
 #endif
-
 #if NVT_TOUCH_MP
 extern int32_t nvt_mp_proc_init(void);
 extern void nvt_mp_proc_deinit(void);
@@ -1223,7 +1222,10 @@ return:
 static int32_t nvt_parse_dt(struct device *dev)
 {
 	struct device_node *np = dev->of_node;
+	struct device_node *chosen = NULL;
 	int32_t ret = 0;
+	char *nvt_get_cmdline = NULL;
+	unsigned long size = 0;
 
 #if NVT_TOUCH_SUPPORT_HW_RST
 	ts->reset_gpio = of_get_named_gpio_flags(np, "novatek,reset-gpio", 0, &ts->reset_flags);
@@ -1247,6 +1249,21 @@ static int32_t nvt_parse_dt(struct device *dev)
 		NVT_LOG("SPI_RD_FAST_ADDR=0x%06X\n", SPI_RD_FAST_ADDR);
 	}
 
+	chosen = of_find_node_by_path("/chosen");
+	if(chosen) {
+		nvt_get_cmdline = (char *)of_get_property(chosen, "bootargs", (int *)&size);
+		//NVT_ERR("nvt get saved_command_line is [%s]", np_temp_cmdline);
+		if (strstr(nvt_get_cmdline, "mdss_dsi_nt36523n_fhd_plus_cphy_144hz_vid")) {
+				NVT_ERR("get normal panel info, set it true");
+				ts->detect_ultra_tp = 0;
+			} else if (strstr(nvt_get_cmdline, "mdss_dsi_nt36523n_fhd_plus_cphy_144hz_hyper_vid")) {
+				NVT_ERR("get ultra panel info, set it true");
+				ts->detect_ultra_tp = 1;
+			} else {
+				//NVT_ERR("not detect normal or ultra screen, exit\n");
+				return 0;
+			}
+		}
 	NVT_LOG("nvt dtsi load ok\n");
 	return ret;
 }
@@ -1358,7 +1375,11 @@ static void nvt_esd_check_func(struct work_struct *work)
 		mutex_lock(&ts->lock);
 		NVT_ERR("do ESD recovery, timer = %d, retry = %d\n", timer, esd_retry);
 		/* do esd recovery, reload fw */
-		nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME);
+		if (ts->detect_ultra_tp) {
+			nvt_update_firmware(BOOT_UPDATE_ULTRA_FIRMWARE_NAME);
+		} else {
+			nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME);
+		}
 		mutex_unlock(&ts->lock);
 		/* update interrupt timer */
 		irq_timer = jiffies;
@@ -1624,7 +1645,12 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 		}
 		nvt_read_fw_history(ts->mmap->MMAP_HISTORY_EVENT0);
 		nvt_read_fw_history(ts->mmap->MMAP_HISTORY_EVENT1);
-		nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME);
+		if (ts->detect_ultra_tp) {
+			nvt_update_firmware(BOOT_UPDATE_ULTRA_FIRMWARE_NAME);
+		} else {
+			nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME);
+		}
+		//nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME);
 #if NVT_CUST_PROC_CMD
 		wdt_recovery = true;
 #endif
@@ -3080,10 +3106,18 @@ static int32_t nvt_ts_resume(struct device *dev)
 #if NVT_TOUCH_SUPPORT_HW_RST
 	gpio_set_value(ts->reset_gpio, 1);
 #endif
-	if (nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME)) {
-		NVT_ERR("download firmware failed, ignore check fw state\n");
+	if (ts->detect_ultra_tp) {
+		if (nvt_update_firmware(BOOT_UPDATE_ULTRA_FIRMWARE_NAME)) {
+			NVT_ERR("download firmware failed, ignore check fw state\n");
+		} else {
+			nvt_check_fw_reset_state(RESET_STATE_REK);
+		}
 	} else {
-		nvt_check_fw_reset_state(RESET_STATE_REK);
+		if (nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME)) {
+			NVT_ERR("download firmware failed, ignore check fw state\n");
+		} else {
+			nvt_check_fw_reset_state(RESET_STATE_REK);
+		}
 	}
 
 //#if !WAKEUP_GESTURE
