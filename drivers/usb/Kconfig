@@ -180,4 +180,6 @@ source "drivers/usb/repeater/Kconfig"
 
 source "drivers/usb/redriver/Kconfig"
 
+source "drivers/usb/cypress/Kconfig"
+
 endif # USB_SUPPORT

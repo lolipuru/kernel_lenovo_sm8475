@@ -1,0 +1,40 @@
+#
+# Kconfig sample for the Cypress USB Type-C and PD Controller
+#
+# Author: Dudley Du <dudl@cypress.com>
+#
+
+menuconfig USBC_CYPRESS_CCG
+	tristate "Cypress USB Type-C and PD (CCG) driver support"
+	default m
+	help
+	  Say Y here if you have Cypress USB Type-C and PD (CCG) controller
+	  devices integrated in your system or connected to your target
+	  board through the I2C or SPI bus.
+
+	  To compile this driver as a module, choose M here: the module will be
+	  called cyccg.
+
+config USBC_CYPRESS_CCG_I2C
+	tristate "CCG I2C interface support"
+	select I2C
+	depends on USBC_CYPRESS_CCG
+	default USBC_CYPRESS_CCG
+	help
+	  Say Y here if you have the I2C bus interface connect to the Cypress
+	  CCG device.
+
+	  To compile this driver as a module, choose M here: the module will be
+	  called cyccg_i2c.
+
+config USBC_CYPRESS_CCG_SPI
+	tristate "CCG SPI interface support"
+	select SPI
+	depends on USBC_CYPRESS_CCG
+	default n
+	help
+	  Say Y here if you have the SPI bus interface connect to the Cypress
+	  CCG device.
+
+	  To compile this driver as a module, choose M here: the module will be
+	  called cyccg_spi.
