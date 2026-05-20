@@ -131,6 +131,13 @@ config LEDS_AW2016
 		this option enables support for the AW2016 RGB LED connected
 		through I2C. Say Y to enable support for the AW2016 LED
 
+config LEDS_AW22XXX
+	tristate "LED Support for AW22XXX"
+	depends on I2C && LEDS_CLASS_FLASH
+	help
+	  Enable LED flash class support for AW22XXX LED flash
+	  controller.
+
 config LEDS_BCM6328
 	tristate "LED Support for Broadcom BCM6328"
 	depends on LEDS_CLASS
