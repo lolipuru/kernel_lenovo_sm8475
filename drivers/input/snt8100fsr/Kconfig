@@ -1,0 +1,9 @@
+#
+# SNT8100FSR driver configuration
+#
+
+config SENSORS_SNT8100FSR
+    tristate "SNT8100FSR Grip Sensor driver"
+    depends on INPUT && I2C
+    help
+      Say Y here to enable

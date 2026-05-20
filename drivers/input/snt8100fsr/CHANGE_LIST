@@ -1,0 +1,19 @@
+    Data    |                        Change
+-------------------------------------------------------------------------
+ 2018/10/19 | Frist release version( Driver version 3.5.0)
+ 2018/10/22 | Add Driver check list
+ 2019/02/12 | remove obsolete wakeirq fields
+ 2019/02/12 | add tap gesture reporting to driver, trdd (Driver Version 3.5.1)
+ 2019/02/13 | Add support for 0-byte read of reg 0 as Activity Request in Normal Power Mode for SPI
+ 2019/02/13 | Fix compile errors caused by vfs_read()/vfs_write()/vfs_getattr() prototype changes
+ 2019/02/13 | support for 4 tap gestures
+ 2019/02/13 | change names of taps and trigger fields in sboot trdd output.
+ 2019/02/13 | Add second 16 byte write of 0's to spi wake to force re-sync of snt8100fsr fifos.
+ 2019/02/13 | add 'profile' sysfs attribute file to linux driver. This allows driver developers to add custom
+    	      user profiles for the various register setups they need to support in their product.(Driver version 3.6.0)
+ 2019/05/09 | Add BCR config to linux driver (Driver version 3.6.1)
+ 2019/06/07 | Support GPIO pin control through device tree
+ 2019/06/10 | Support read register script file when device boot
+ 2019/06/22 | Fix mutex lock for kernel panic on newer kernel version
+ 2019/06/24 | Add profile feature for customize key behavior
+ 2019/08/01 | Add MT_DEMO_APP feature and report the track_report to SentonsTouchDemo apk.

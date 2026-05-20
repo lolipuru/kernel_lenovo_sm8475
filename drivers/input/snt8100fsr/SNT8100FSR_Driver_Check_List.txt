@@ -1,0 +1,110 @@
+0. Things need to check before driver probe
+    0.1. Add the path of driver's Makefile and Kconfig into parent folder propertly.
+    0.2. Add "CONFIG_SENSORS_SNT8100FSR=y" into default config file (for example: kernel/arch/arm64/config/msm_defconfig)
+    0.3. Add edge dtsi file into device tree folder (for example: kernel/arch/arm64/boot/dts/qcom/)
+        0.3.1. Check compatible string, should be the same as i2c_device_id which defined in driver (i2c_bus.c)
+        0.3.2. Check reset, interrupt pin number is correct or not
+
+    NOTE: snt8100fsr_edge_dragonboard.dtsi is device tree file for reference
+
+1. Driver Probe (After driver integrated)
+    adb shell dmesg | grep "\[EDGE\]"
+        [    9.484449] [EDGE] snt8100fsr: FUNC: snt_i2c_probe()
+        [    9.484462] [EDGE] snt8100fsr: INFO: snt_i2c_probe: Driver Version Rel.3.5.0
+        [    9.490989] [EDGE] snt8100fsr: INFO: snt_i2c_probe: Main I2C device discovered
+        [    9.497680] [EDGE] snt8100fsr: FUNC: main_init()
+        [    9.498048] [EDGE] snt8100fsr: FUNC: input_device_init()
+        [    9.498073] [EDGE] snt8100fsr: FUNC: register_input_events()
+        ...
+        ...
+        [    9.580562] [EDGE] snt8100fsr: DBUG: snt_sysfs_init: done
+        [    9.580567] [EDGE] snt8100fsr: DBUG: snt_i2c_probe: done
+
+2. Check firmware download status
+    adb shell dmesg | grep "\[EDGE\]"
+        [   20.225896] [EDGE] snt8100fsr: FUNC: firmware_transfer_payloads()
+        [   20.225901] [EDGE] snt8100fsr: INFO: firmware_transfer_payloads: EOF Reached. Firmware data uploaded.
+        [   20.225905] [EDGE] snt8100fsr: FUNC: firmware_cleanup()
+        [   20.225909] [EDGE] snt8100fsr: DBUG: firmware_cleanup: Total 183040 bytes took 6005ms at 237 kbit/s
+        [   20.225937] [EDGE] snt8100fsr: DBUG: firmware_cleanup: Finished
+        [   20.225940] [EDGE] snt8100fsr: FUNC: set_context_fwd_done()
+        [   20.225944] [EDGE] snt8100fsr: DBUG: set_context_fwd_done: context_fwd set to false
+        [   20.225946] [EDGE] snt8100fsr: FUNC: init_after_reset()
+        [   20.225950] [EDGE] snt8100fsr: INFO: init_after_reset: irq_handler is registered.
+        [   20.226429] [EDGE] snt8100fsr: INFO: read_register: 0x0000 == 0x0001
+        [   20.226432] [EDGE] snt8100fsr: INFO: init_after_reset: System booted
+        [   20.244240] [EDGE] snt8100fsr: NOTE: read_product_config: Product Info: FW Version : 001.0070.052\x0aAPI Version: 001.0016.000\x0aBuild Date: Sat, Oct 13, 2018  7:58:13 AM\x0aMD5 Hash  : 37110e557e765cf7794eb2b776c38880\x0aFW_SHA: 1b1ec1e8e9ea90e3923bf3535fda5f918f0c187c(160)@2018-08-28 11:45:25 -0700\x0aGEN_C_DATE: 2018-04-25 18:16:51 -0700\x0aGEN_C_SHA : 270873b0fcb511940010e958e8c51fb23b81c66d\x0aGEN_C_ARGS: 'panel','PH_0010_LP_Pixie','g1d_bars',[1 2],'det_clsf_cfg',{'PH_0010_LP_Pixie/sol_evt5thin_1ceq_180423/bend-m4','PH_0010_LP_Pixie/sol_evt5thin_1ceq_180423/wdrop-m4','PH_0010_LP_Pixie/sol-180420/uwat-m1'},'det_clsf_mpa',[1 2 3],'gen_clsf_file',false,'gen_clsf_file_ver',1,'det_clsf_mpa_T_term',0.15,'panel_version',24
+
+
+3. Check firmware and register information via driver sysfs(attributes)
+    adb shell
+    msm8996:/ #cd /sys/snt8100fsr/
+    msm8996:/sys/snt8100fsr # cat product_config
+        FW Version : 001.0070.052
+        API Version: 001.0016.000
+        Build Date: Sat, Oct 13, 2018  7:58:13 AM
+        MD5 Hash  : 37110e557e765cf7794eb2b776c38880
+        FW_SHA: 1b1ec1e8e9ea90e3923bf3535fda5f918f0c187c(160)@2018-08-28 11:45:25 -0700
+        GEN_C_DATE: 2018-04-25 18:16:51 -0700
+        GEN_C_SHA : 270873b0fcb511940010e958e8c51fb23b81c66d
+        GEN_C_ARGS: 'panel','PH_0010_LP_Pixie','g1d_bars',[1 2],'det_clsf_cfg',{'PH_0010_LP_
+        Pixie/sol_evt5thin_1ceq_180423/bend-m4','PH_0010_LP_Pixie/sol_evt5thin_1ceq_180423/wdr
+        op-m4','PH_0010_LP_Pixie/sol-180420/uwat-m1'},'det_clsf_mpa',[1 2 3],'gen_clsf_file',
+        false,'gen_clsf_file_ver',1,'det_clsf_mpa_T_term',0.15,'panel_version',24
+
+    msm8996:/sys/snt8100fsr # echo 0x0 0x7a > get_reg
+    msm8996:/sys/snt8100fsr # cat get_reg
+        0x0000 0x0001 0x0000 0xffff 0xffff 0x0000 0x0000 0x80ff 0x0000 0x7022 0x4133
+        0x0000 0x4000 0x4000 0x4000 0x4000 0x0000 0x01a2 0x0000 0x0000 0x0000 0x0000
+        0x0000 0x0000 0x0000 0x01a2 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000
+        0x01a2 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x00ff
+        0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0xffff 0xffff 0xffff
+        0xffff 0x0003 0x0000 0x0000 0x0000 0x0000 0x0004 0x0000 0x0000 0x0000 0x0000
+        0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000
+        0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000
+        0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000
+        0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000
+        0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000
+        0x0000
+
+4. Capture D1test for waveform analysis (No Touch)
+    adb root
+    adb remount
+    adb shell "mkdir /data/snt8100fsr"
+    adb shell "setenforce 0"
+    adb shell "echo 1000 > /sys/snt8100fsr/log_d1test"
+    ...
+    //Please do not touch the sensor bazel before execution finish
+    ...
+    (Once command execution finish)
+    Check any error in kernel log (adb shell dmesg | grep "\[EDGE\]"), if not, download the d1test log from device
+    adb pull /data/snt8100fsr/d1test_data.log
+    mv d1test_data.log d1test_data_notouch.log
+
+5. Capture D1test for waveform analysis (Volume-Key Touch)
+    adb root
+    adb remount
+    adb shell "mkdir /data/snt8100fsr"
+    adb shell "setenforce 0"
+    adb shell "echo 1000 > /sys/snt8100fsr/log_d1test"
+    ...
+    //Press each volume key 3~5 times before command finish
+    ...
+    (Once command execution finish)
+    Check any error in kernel log (adb shell dmesg | grep "\[EDGE\]"), if not, download the d1test log from device
+    adb pull /data/snt8100fsr/d1test_data.log
+
+6. Check touch event response
+    adb shell dmesg | grep "\[EDGE\]"
+        [ 1702.972950] [EDGE] snt8100fsr: INFO: irq_handler_top: irq_count: 201
+        [ 1702.973078] [EDGE] snt8100fsr: DBUG: irq_handler_top: done
+        [ 1702.973446] [EDGE] snt8100fsr: FUNC: event_wq_func()
+        [ 1702.976148] [EDGE] snt8100fsr: INFO: read_register: 0x0000 == 0x0002
+        [ 1702.979093] [EDGE] snt8100fsr: DBUG: read_track_reports: [16, 2]
+        [ 1702.982315] [EDGE] snt8100fsr: DBUG: process_track_reports: Report 177: B0, T2, F2, 276, 182, 96
+        [ 1702.982362] [EDGE] snt8100fsr: DBUG: process_track_reports: Report 177: B1, T1, F24, 335, 251, 167
+        [ 1702.984702] [EDGE] snt8100fsr: INFO: read_register: 0x0000 == 0x0000
+        [ 1702.984748] [EDGE] snt8100fsr: DBUG: event_wq_func: done
+
+
+

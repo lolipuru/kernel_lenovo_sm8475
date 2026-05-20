@@ -1,0 +1,100 @@
+/* Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+&soc {
+    i2c@75b6000 { /* BLSP2 QUP2 */
+        snt8100fsr-i2c@0 {
+            compatible = "snt8100fsr-i2c";
+            reg = <0x5c>;
+            snt,i2c-freq-khz = <400>;
+            snt,gpio_rst = <&tlmm 105 0x00>;
+            snt,gpio_hostirq = <&tlmm 106 0x00>;
+            interrupt-parent = <&tlmm>;
+            interrupts = <106 0>;
+            interrupt-names = "snt_hostirq";
+        };
+        snt8100fsr-i2c@1 {
+            compatible = "snt8100fsr-i2c-wake";
+            reg = <0x4c>;
+            snt,i2c-freq-khz = <400>;
+            wake-device;
+        };
+    };
+
+    spi@7575000 { /* BLSP1 QUP1 */
+        status = "ok";
+        snt8100fsr-spi@0 {
+            compatible = "sentons,snt8100fsr-spi";
+            reg = <0>;
+            spi-max-frequency = <1000000>;
+            snt,spi-freq-hz = <1000000>;
+            snt,gpio_rst = <&tlmm 114 0x00>;
+            snt,gpio_hostirq = <&tlmm 115 0x00>;
+            interrupt-parent = <&tlmm>;
+            interrupts = <115 0>;
+            interrupt-names = "snt_hostirq";
+            pinctrl-names = "snt_reset_active", "snt_reset_reset", "snt_hostirq_active";
+            pinctrl-0 = <&snt_reset_active>;
+            pinctrl-1 = <&snt_reset_reset>;
+            pinctrl-2 = <&snt_hostirq_active>;
+        };
+    };
+
+    tlmm: pinctrl@01010000 {
+        snt_reset {
+            snt_reset_active: snt_reset_active {
+                mux {
+                    pins = "gpio114";
+                    function = "gpio";
+                };
+
+                config {
+                    pins = "gpio114";
+                    drive-strength = <6>;
+                    bias-disable;
+                    output-low;
+                };
+            };
+
+            snt_reset_reset: snt_reset_reset {
+                mux {
+                    pins = "gpio114";
+                    function = "gpio";
+                };
+
+                config {
+                    pins = "gpio114";
+                    drive-strength = <6>;
+                    bias-disable;
+                    output-high;
+                };
+            };
+        };
+
+        snt_hostirq {
+            snt_hostirq_active: snt_hostirq_active {
+                mux {
+                    pins = "gpio115";
+                    function = "gpio";
+                };
+
+                config {
+                    pins = "gpio115";
+                    drive-strength = <6>;
+                    bias-disable;
+                    input-enable;
+                };
+            };
+        };
+    };
+};
+
