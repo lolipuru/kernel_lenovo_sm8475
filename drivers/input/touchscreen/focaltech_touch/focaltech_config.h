@@ -2,7 +2,7 @@
  *
  * FocalTech TouchScreen driver.
  *
- * Copyright (c) 2012-2019, FocalTech Systems, Ltd., all rights reserved.
+ * Copyright (c) 2012-2020, FocalTech Systems, Ltd., all rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -14,7 +14,6 @@
  * GNU General Public License for more details.
  *
  */
-
 /************************************************************************
 *
 * File Name: focaltech_config.h
@@ -57,7 +56,6 @@
 #define _FT7250             0x7250081A
 #define _FT7120             0x7120081B
 #define _FT8720             0x8720081C
-#define _FT8726             0x8726081C
 #define _FT8016             0x8016081D
 
 
@@ -102,9 +100,6 @@
 
 #define _FT3267             0x32670004
 #define _FT3367             0x33670004
-
-#define _FT3327DQQ_XXX      0x3327D482
-#define _FT5446DQS_XXX      0x5446D482
 
 #define _FT3427_003         0x3427D482
 #define _FT3427G_003        0x3427A482
@@ -161,6 +156,13 @@
 
 #define _FT3658U            0x3658D488
 
+/*************************************************/
+
+/*
+ * choose your ic chip type of focaltech
+ */
+#define FTS_CHIP_TYPE   _FT3658U
+
 /******************* Enables *********************/
 /*********** 1 to enable, 0 to disable ***********/
 
@@ -194,11 +196,6 @@
  */
 #define FTS_ESDCHECK_EN                         0
 
-/*
- * Production test enable
- * 1: enable, 0:disable(default)
- */
-#define FTS_TEST_EN                             0
 
 /*
  * Pinctrl enable
@@ -229,7 +226,7 @@
 /*
  * Numbers of modules support
  */
-#define FTS_GET_MODULE_NUM                      2
+#define FTS_GET_MODULE_NUM                      0
 
 /*
  * module_id: mean vendor_id generally, also maybe gpio or lcm_id...
@@ -239,7 +236,7 @@
  * FTS_GET_MODULE_NUM >= 3, compatible with FTS_MODULE3_ID
  */
 #define FTS_MODULE_ID                          0x0000
-#define FTS_MODULE2_ID                         0xd566
+#define FTS_MODULE2_ID                         0x0000
 #define FTS_MODULE3_ID                         0x0000
 
 /*
@@ -250,8 +247,8 @@
  * You should rename fw to "focaltech_ts_fw_tianma", and push it into
  * etc/firmware or by customers
  */
-#define FTS_MODULE_NAME                        "gvo"
-#define FTS_MODULE2_NAME                       "jdi"
+#define FTS_MODULE_NAME                        ""
+#define FTS_MODULE2_NAME                       ""
 #define FTS_MODULE3_NAME                       ""
 
 /*
@@ -259,19 +256,19 @@
  * define your own fw_file, the sample one to be replaced is invalid
  * NOTE: if FTS_GET_MODULE_NUM > 1, it's the fw corresponding with FTS_VENDOR_ID
  */
-#define FTS_UPGRADE_FW_FILE                    "include/firmware/fw_sample.i"
+#define FTS_UPGRADE_FW_FILE                      "include/firmware/FT3658U_Lenovo_Moba2_SDC_V18_D01_20210222_app.i"
 
 /*
  * if FTS_GET_MODULE_NUM >= 2, fw corrsponding with FTS_VENDOR_ID2
  * define your own fw_file, the sample one is invalid
  */
-#define FTS_UPGRADE_FW2_FILE                   "include/firmware/fw_sample.i"
+#define FTS_UPGRADE_FW2_FILE                     "include/firmware/fw_sample.i"
 
 /*
  * if FTS_GET_MODULE_NUM >= 3, fw corrsponding with FTS_VENDOR_ID3
  * define your own fw_file, the sample one is invalid
  */
-#define FTS_UPGRADE_FW3_FILE                   "include/firmware/fw_sample.i"
+#define FTS_UPGRADE_FW3_FILE                     "include/firmware/fw_sample.i"
 
 /*********************************************************/
 

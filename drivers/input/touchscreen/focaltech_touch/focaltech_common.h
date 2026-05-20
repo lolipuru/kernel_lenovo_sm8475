@@ -2,7 +2,7 @@
  *
  * FocalTech fts TouchScreen driver.
  *
- * Copyright (c) 2012-2019, Focaltech Ltd. All rights reserved.
+ * Copyright (c) 2012-2020, Focaltech Ltd. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -49,10 +49,12 @@
 #define FLAG_HID_BIT            10
 #define FLAG_IDC_BIT            11
 
-#define IC_SERIALS(type)        ((type) & FLAGBITS(0, FLAG_ICSERIALS_LEN-1))
+#define IC_SERIALS              (FTS_CHIP_TYPE & FLAGBITS(0, FLAG_ICSERIALS_LEN-1))
 #define IC_TO_SERIALS(x)        ((x) & FLAGBITS(0, FLAG_ICSERIALS_LEN-1))
-#define FTS_CHIP_IDC(type)            (((type) & FLAGBIT(FLAG_IDC_BIT)) == FLAGBIT(FLAG_IDC_BIT))
-#define FTS_HID_SUPPORTTED(type)      (((type) & FLAGBIT(FLAG_HID_BIT)) == FLAGBIT(FLAG_HID_BIT))
+#define FTS_CHIP_IDC            ((FTS_CHIP_TYPE & FLAGBIT(FLAG_IDC_BIT)) == FLAGBIT(FLAG_IDC_BIT))
+#define FTS_HID_SUPPORTTED      ((FTS_CHIP_TYPE & FLAGBIT(FLAG_HID_BIT)) == FLAGBIT(FLAG_HID_BIT))
+
+#define FTS_CHIP_TYPE_MAPPING {{0x88, 0x56, 0x52, 0x00, 0x00, 0x00, 0x00, 0x56, 0xB2}}
 
 #define FILE_NAME_LENGTH                    128
 #define ENABLE                              1
@@ -87,8 +89,8 @@
 #define FTS_REG_IDE_PARA_STATUS             0xB6
 #define FTS_REG_GLOVE_MODE_EN               0xC0
 #define FTS_REG_COVER_MODE_EN               0xC1
-#define FTS_REG_REPORT_RATE                 0x88
 #define FTS_REG_CHARGER_MODE_EN             0x8B
+#define FTS_REG_ORIENTATION_MODE_EN         0x8C
 #define FTS_REG_GESTURE_EN                  0xD0
 #define FTS_REG_GESTURE_OUTPUT_ADDRESS      0xD3
 #define FTS_REG_MODULE_ID                   0xE3
@@ -99,15 +101,14 @@
 #define FTS_SYSFS_ECHO_OFF(buf)     (buf[0] == '0')
 
 #define kfree_safe(pbuf) do {\
-	if (pbuf) {\
-		kfree(pbuf);\
-		pbuf = NULL;\
-	}\
+    if (pbuf) {\
+        kfree(pbuf);\
+        pbuf = NULL;\
+    }\
 } while(0)
 
 /*****************************************************************************
-*  Alternative mode (When something goes wrong,
-* the modules may be able to solve the problem.)
+*  Alternative mode (When something goes wrong, the modules may be able to solve the problem.)
 *****************************************************************************/
 /*
  * point report check
@@ -119,21 +120,21 @@
 * Global variable or extern global variabls/functions
 *****************************************************************************/
 struct ft_chip_t {
-	u64 type;
-	u8 chip_idh;
-	u8 chip_idl;
-	u8 rom_idh;
-	u8 rom_idl;
-	u8 pb_idh;
-	u8 pb_idl;
-	u8 bl_idh;
-	u8 bl_idl;
+    u64 type;
+    u8 chip_idh;
+    u8 chip_idl;
+    u8 rom_idh;
+    u8 rom_idl;
+    u8 pb_idh;
+    u8 pb_idl;
+    u8 bl_idh;
+    u8 bl_idl;
 };
 
 struct ts_ic_info {
-	bool is_incell;
-	bool hid_supported;
-	struct ft_chip_t ids;
+    bool is_incell;
+    bool hid_supported;
+    struct ft_chip_t ids;
 };
 
 /*****************************************************************************
@@ -141,15 +142,15 @@ struct ts_ic_info {
 *****************************************************************************/
 #if FTS_DEBUG_EN
 #define FTS_DEBUG(fmt, args...) do { \
-	printk("[FTS_TS]%s:"fmt"\n", __func__, ##args); \
+    printk("[FTS_TS]%s:"fmt"\n", __func__, ##args); \
 } while (0)
 
 #define FTS_FUNC_ENTER() do { \
-	printk("[FTS_TS]%s: Enter\n", __func__); \
+    printk("[FTS_TS]%s: Enter\n", __func__); \
 } while (0)
 
 #define FTS_FUNC_EXIT() do { \
-	printk("[FTS_TS]%s: Exit(%d)\n", __func__, __LINE__); \
+    printk("[FTS_TS]%s: Exit(%d)\n", __func__, __LINE__); \
 } while (0)
 #else /* #if FTS_DEBUG_EN*/
 #define FTS_DEBUG(fmt, args...)
@@ -158,10 +159,10 @@ struct ts_ic_info {
 #endif
 
 #define FTS_INFO(fmt, args...) do { \
-	printk(KERN_INFO "[FTS_TS/I]%s:"fmt"\n", __func__, ##args); \
+    printk(KERN_INFO "[FTS_TS/I]%s:"fmt"\n", __func__, ##args); \
 } while (0)
 
 #define FTS_ERROR(fmt, args...) do { \
-	printk(KERN_ERR "[FTS_TS/E]%s:"fmt"\n", __func__, ##args); \
+    printk(KERN_ERR "[FTS_TS/E]%s:"fmt"\n", __func__, ##args); \
 } while (0)
 #endif /* __LINUX_FOCALTECH_COMMON_H__ */
