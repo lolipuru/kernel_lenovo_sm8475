@@ -63,3 +63,4 @@ obj-$(CONFIG_AMLOGIC_THERMAL)     += amlogic_thermal.o
 obj-$(CONFIG_SPRD_THERMAL)	+= sprd_thermal.o
 obj-$(CONFIG_KHADAS_MCU_FAN_THERMAL)	+= khadas_mcu_fan.o
 obj-$(CONFIG_LENOVO_SYS_TEMP)   += lenovo_sys_temp.o
+obj-$(CONFIG_LENOVO_THERMAL)   += lenovo-thermal.o
