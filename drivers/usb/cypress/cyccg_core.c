@@ -263,7 +263,7 @@ static int cyccg_pmic_control(struct hpi_device *port,
 
 	cyccg_port_vdbg(">>>> enter\n", port);
 
-	port_name = port_name;	/* Suppress compile warning. */
+	(void)port_name;  /* Suppress compile warning. */
 	if (is_source) {
 		cyccg_port_dbg("set CCG as power Source device, <%dmV, %dmA>\n",
 			port, voltage_mV, current_mA);
@@ -310,7 +310,7 @@ static int cyccg_usb_mode_control(struct hpi_device *port,
 
 	cyccg_port_vdbg(">>>> enter\n", port);
 
-	port_name = port_name;	/* Suppress compile warning. */
+	(void)port_name;	/* Suppress compile warning. */
 	switch (usb_mode) {
 	case USB_DRP:
 		cyccg_port_dbg("set usb_mode to USB_DRP\n", port);

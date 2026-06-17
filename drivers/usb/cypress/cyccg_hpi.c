@@ -5048,7 +5048,7 @@ int hpi_port_disable_billboard_reset(struct hpi_device *port, bool disabled,
 				     hpi_cmd_cb_t callback, void *param)
 {
 	u8 signature = disabled ? HPI_SIGNATURE_BILLBOARD_RESET_DISABLED :
-				~HPI_SIGNATURE_BILLBOARD_RESET_DISABLED;
+				(u8)~HPI_SIGNATURE_BILLBOARD_RESET_DISABLED;
 
 	return _hpi_port_disable_billboard_reset(port, signature, sync_mode,
 						 callback, param);

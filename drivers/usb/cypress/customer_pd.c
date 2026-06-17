@@ -113,7 +113,7 @@ static inline int usbc_pdport_init(struct usbc_pdport *pdport, char *name)
 
 static inline void usbc_pdport_deinit(struct usbc_pdport *pdport)
 {
-	char *port_name;
+	char *port_name = NULL;
 
 	if (!pdport) {
 		pd_err("invalid pdport=NULL\n", port_name);
