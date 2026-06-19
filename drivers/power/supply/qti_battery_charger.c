@@ -101,14 +101,28 @@ enum battery_property_id {
 	BATT_RESISTANCE,
 	BATT_POWER_NOW,
 	BATT_POWER_AVG,
+#if defined(CONFIG_TARGET_PRODUCT_HALO) || defined(CONFIG_TARGET_PRODUCT_DIABLO)
+	BATT_FG_DIE_TEMP,
+#else
 	BATT_CP_IBUS_NOW,
 	BATT_CP_VBUS_NOW,
 	BATT_SW_IBUS_NOW,
+#endif
 	BATT_CHG_ENABLE,
+#if defined(CONFIG_TARGET_PRODUCT_HALO) || defined(CONFIG_TARGET_PRODUCT_DIABLO)
+	BATT_CHG_ACCELERATE_EN,
+	BATT_CHG_HEALTH_EN,
+	BATT_CHG_BYPASS_EN,
+	BATT_FG_SOC_H,
+	BATT_FG_SOC_L,
+	BATT_VOLT_NOW_QCOM,
+	BATT_SUSPEND_EN,
+#else
 	BATT_MAINTAIN_ENABLE,
 	BATT_PROTECT_ENABLE,
 	BATT_FAKETEMP_ENABLE,
 	BATT_EXTFGREAD_ENABLE,
+#endif
 	BATT_PROP_MAX,
 };
 
@@ -129,10 +143,12 @@ enum usb_property_id {
 	USB_SCOPE,
 	USB_CONNECTOR_TYPE,
 	F_ACTIVE,
+#ifdef CONFIG_TARGET_PRODUCT_ASPHALT
 	USB_TYPEC_ORIENT,
 	USB_TYPEC_ORIENTC2,
 	USB_IN_DET,
 	USB_IN_DET2,
+#endif
 	USB_PROP_MAX,
 };
 
@@ -1875,6 +1891,143 @@ static ssize_t usb_real_type_show(struct class *c,
 }
 static CLASS_ATTR_RO(usb_real_type);
 
+#if defined(CONFIG_TARGET_PRODUCT_HALO) || defined(CONFIG_TARGET_PRODUCT_DIABLO)
+static ssize_t temp_raw_show(struct device *dev,
+                 struct device_attribute *attr,
+                 char *buf)
+{
+    struct battery_chg_dev *bcdev = dev_get_drvdata(dev);
+    struct psy_state *pst;
+ 
+    struct battery_charger_req_msg req_msg = { { 0 } };
+    int raw_temp;
+    int temp_c;
+    int rc;
+ 
+    req_msg.hdr.owner   = MSG_OWNER_BC;
+    req_msg.hdr.type    = MSG_TYPE_REQ_RESP;
+    req_msg.hdr.opcode  = BC_BATTERY_STATUS_GET;
+    req_msg.property_id = BATT_TEMP;
+    req_msg.battery_id  = 0;  
+    req_msg.value       = 0;
+ 
+    rc = battery_chg_write(bcdev, &req_msg, sizeof(req_msg));
+    if (rc < 0) {
+        pr_err("Failed to get temp_raw rc=%d\n", rc);
+        temp_c = 0;
+    } else {
+        pst = NULL; 
+        raw_temp = pst->prop[BATT_TEMP];  
+        temp_c = DIV_ROUND_CLOSEST(raw_temp, 10);
+    }
+
+    return scnprintf(buf, PAGE_SIZE, "%d\n", temp_c);
+}
+
+static ssize_t batt_qcom_voltage_now_show(struct device *dev,
+					  struct device_attribute *attr,
+					  char *buf)
+{
+	struct battery_chg_dev *bcdev = dev_get_drvdata(dev);
+	struct psy_state *pst;
+ 
+	struct battery_charger_req_msg req_msg = { { 0 } };
+	int rc;
+ 
+	req_msg.hdr.owner   = MSG_OWNER_BC;
+	req_msg.hdr.type    = MSG_TYPE_REQ_RESP;
+	req_msg.hdr.opcode  = BC_BATTERY_STATUS_GET;
+	req_msg.property_id = BATT_EXTFGREAD_ENABLE; 
+	req_msg.battery_id  = 0; 
+	req_msg.value       = 0;
+ 
+	rc = battery_chg_write(bcdev, &req_msg, sizeof(req_msg));
+ 
+	if (rc >= 0) {
+		pst = NULL;
+ 
+		rc = scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[31]);
+	}
+ 
+	return rc;
+}
+
+static ssize_t batt_fg_soc_l_show(struct device *dev,
+                   struct device_attribute *attr,
+                   char *buf)
+{
+    struct battery_chg_dev *bcdev = dev_get_drvdata(dev);
+    struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_BATTERY];
+    struct battery_charger_req_msg req_msg = { { 0 } };
+    int rc;
+ 
+    req_msg.hdr.owner   = MSG_OWNER_BC;
+    req_msg.hdr.type    = MSG_TYPE_REQ_RESP;
+    req_msg.hdr.opcode  = BC_BATTERY_STATUS_GET;
+    req_msg.property_id = BATT_FG_SOC_L;
+    req_msg.battery_id  = 0;
+    req_msg.value       = 0;
+ 
+    rc = battery_chg_write(bcdev, &req_msg, sizeof(req_msg));
+ 
+    if (rc >= 0)
+        rc = scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[BATT_FG_SOC_L]);
+ 
+    return rc;
+}
+static DEVICE_ATTR_RO(batt_fg_soc_l);
+ 
+static ssize_t batt_fg_soc_h_show(struct device *dev,
+                   struct device_attribute *attr,
+                   char *buf)
+{
+    struct battery_chg_dev *bcdev = dev_get_drvdata(dev);
+    struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_BATTERY];
+    struct battery_charger_req_msg req_msg = { { 0 } };
+    int rc;
+ 
+    req_msg.hdr.owner   = MSG_OWNER_BC;
+    req_msg.hdr.type    = MSG_TYPE_REQ_RESP;
+    req_msg.hdr.opcode  = BC_BATTERY_STATUS_GET;
+    req_msg.property_id = BATT_FG_SOC_H;
+    req_msg.battery_id  = 0;
+    req_msg.value       = 0;
+ 
+    rc = battery_chg_write(bcdev, &req_msg, sizeof(req_msg));
+ 
+    if (rc >= 0)
+        rc = scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[BATT_FG_SOC_H]);
+ 
+    return rc;
+}
+static DEVICE_ATTR_RO(batt_fg_soc_h);
+ 
+static ssize_t batt_fg_die_temp_show(struct device *dev,
+                     struct device_attribute *attr,
+                     char *buf)
+{
+    struct battery_chg_dev *bcdev = dev_get_drvdata(dev);
+    struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_BATTERY];
+    struct battery_charger_req_msg req_msg = { { 0 } };
+    int rc;
+ 
+    req_msg.hdr.owner   = MSG_OWNER_BC;
+    req_msg.hdr.type    = MSG_TYPE_REQ_RESP;
+    req_msg.hdr.opcode  = BC_BATTERY_STATUS_GET;
+    req_msg.property_id = BATT_FG_DIE_TEMP;
+    req_msg.battery_id  = 0;
+    req_msg.value       = 0;
+ 
+    rc = battery_chg_write(bcdev, &req_msg, sizeof(req_msg));
+ 
+    if (rc >= 0)
+        rc = scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[BATT_FG_DIE_TEMP]);
+ 
+    return rc;
+}
+static DEVICE_ATTR_RO(batt_fg_die_temp);
+
+#else
 static ssize_t usb_typec_orientation_show(struct class *c,
 				struct class_attribute *attr, char *buf)
 {
@@ -1992,6 +2145,7 @@ static ssize_t sw_ibus_now_show(struct class *c,
 	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[BATT_SW_IBUS_NOW]);
 }
 static CLASS_ATTR_RO(sw_ibus_now);
+#endif
 
 static ssize_t restrict_cur_store(struct class *c, struct class_attribute *attr,
 				const char *buf, size_t count)
@@ -2508,6 +2662,8 @@ static struct attribute *battery_class_attrs[] = {
 	&class_attr_restrict_chg.attr,
 	&class_attr_restrict_cur.attr,
 	&class_attr_usb_real_type.attr,
+	&class_attr_usb_typec_compliant.attr,
+#ifdef CONFIG_TARGET_PRODUCT_ASPHALT
 	&class_attr_cp_ibus_now.attr,
 	&class_attr_cp_vbus_now.attr,
 	&class_attr_sw_ibus_now.attr,
@@ -2516,11 +2672,11 @@ static struct attribute *battery_class_attrs[] = {
 	&class_attr_batt_protect_en.attr,
 	&class_attr_batt_faketemp_en.attr,
 	&class_attr_batt_extfgread_en.attr,
-	&class_attr_usb_typec_compliant.attr,
 	&class_attr_usb_typec_orientation.attr,
 	&class_attr_usb_typec_orientationc2.attr,
 	&class_attr_usb_in_det.attr,
 	&class_attr_usb_in_det2.attr,
+#endif
 	&class_attr_charging_enabled.attr,
 	NULL,
 };
