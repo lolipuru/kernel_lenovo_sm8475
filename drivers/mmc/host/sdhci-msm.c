@@ -1963,7 +1963,8 @@ static void sdhci_msm_check_power_status(struct sdhci_host *host, u32 req_type)
 
 	}
 
-	if ((req_type & REQ_BUS_ON) && mmc->card && !mmc->ops->get_cd(mmc)) {
+	if (mmc->card && mmc->ops->get_cd && !mmc->ops->get_cd(mmc) &&
+	    (req_type & REQ_BUS_ON)) {
 		sdhci_writeb(host, 0, SDHCI_POWER_CONTROL);
 		host->pwr = 0;
 	}
@@ -2351,8 +2352,8 @@ static void sdhci_msm_handle_pwr_irq(struct sdhci_host *host, int irq)
 		udelay(10);
 	}
 
-	if ((irq_status & CORE_PWRCTL_BUS_ON) && mmc->card &&
-	    !mmc->ops->get_cd(mmc)) {
+	if (mmc->card && mmc->ops->get_cd && !mmc->ops->get_cd(mmc) &&
+	    irq_status & CORE_PWRCTL_BUS_ON) {
 		msm_host_writel(msm_host, CORE_PWRCTL_BUS_FAIL, host,
 				msm_offset->core_pwrctl_ctl);
 		return;
