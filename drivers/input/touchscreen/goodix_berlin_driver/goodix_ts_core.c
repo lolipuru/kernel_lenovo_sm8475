@@ -32,27 +32,85 @@
 #define GOOIDX_INPUT_PHYS			"goodix_ts/input0"
 
 #if defined(CONFIG_DRM)
+#include <drm/drm_panel.h>
 static struct drm_panel *active_panel;
+static int drm_register_work_times;
 static void goodix_panel_notifier_callback(enum panel_event_notifier_tag tag,
 		 struct panel_event_notification *event, void *client_data);
 
-static void goodix_register_for_panel_events(struct device_node *dp,
+static int goodix_ts_register_for_panel_events(struct device_node *dp,
 					struct goodix_ts_core *cd)
 {
 	void *cookie;
+	const char *touch_environment = NULL;
+
+	if (of_property_read_string(dp, "qcom,touch-environment", &touch_environment)) {
+		ts_err("No touch type\n");
+		return -EINVAL;
+	}
+
+	if (strcmp(touch_environment, "pvm")) {
+		pr_err("Invalid touch type\n");
+		return -EINVAL;
+	}
 
 	cookie = panel_event_notifier_register(PANEL_EVENT_NOTIFICATION_PRIMARY,
 			PANEL_EVENT_NOTIFIER_CLIENT_PRIMARY_TOUCH, active_panel,
-			&goodix_panel_notifier_callback, cd);
+			goodix_panel_notifier_callback, cd);
 	if (!cookie) {
 		pr_err("Failed to register for panel events\n");
-		return;
+		return -EINVAL;
 	}
 
-	ts_debug("registered for panel notifications panel: 0x%x\n",
-			active_panel);
+	ts_info("registered for panel notifications panel: 0x%x\n\n",
+			(unsigned int)(uintptr_t)active_panel);
 
 	cd->notifier_cookie = cookie;
+	return 0;
+}
+
+static void drm_register_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct goodix_ts_core *cd = container_of(dwork, struct goodix_ts_core, drm_work);
+	struct device_node *np = cd->pdev->dev.of_node;
+	int count, i;
+	struct device_node *panel_node;
+	struct drm_panel *panel;
+
+	count = of_count_phandle_with_args(np, "panel", NULL);
+	if (count <= 0) {
+		ts_info("find drm_panel count(%d) fail\n", count);
+		goto retry;
+	}
+
+	for (i = 0; i < count; i++) {
+		panel_node = of_parse_phandle(np, "panel", i);
+		if (!panel_node)
+			continue;
+		panel = of_drm_find_panel(panel_node);
+		of_node_put(panel_node);
+		if (!IS_ERR_OR_NULL(panel)) {
+			active_panel = panel;
+			ts_info("find drm_panel successfully\n");
+			break;
+		}
+	}
+
+	if (!active_panel) {
+		ts_info("no find drm_panel\n");
+		goto retry;
+	}
+
+	goodix_ts_register_for_panel_events(np, cd);
+	return;
+
+retry:
+	if (drm_register_work_times <= 9) {
+		drm_register_work_times++;
+		queue_delayed_work(system_wq, &cd->drm_work, 250);
+		printk("fts: try register drm after 1s\n");
+	}
 }
 
 #endif
@@ -894,6 +952,84 @@ static const struct file_operations rawdata_proc_fops = {
 };
 #endif
 
+static u8 tp_720hz_mode;
+static struct goodix_ts_cmd enter_720hz_cmd = {
+	.buf = { 0x00, 0x00, 0x05, 0xc1, 0x01, 0xc7, 0x00, 0x00 }
+};
+static struct goodix_ts_cmd exit_720hz_cmd  = {
+	.buf = { 0x00, 0x00, 0x05, 0xc1, 0x00, 0xc6, 0x00, 0x00 }
+};
+
+static int goodix_ts_720hz_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "tp 720hz %s\n", tp_720hz_mode ? "enable" : "disable");
+	return 0;
+}
+
+static int goodix_ts_720hz_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, goodix_ts_720hz_show, PDE_DATA(inode));
+}
+
+static ssize_t goodix_ts_720hz_store(struct file *file, const char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	struct seq_file *m = file->private_data;
+	struct goodix_ts_core *cd = m ? m->private : NULL;
+	char *cmd_buf;
+	int ret;
+
+	if (!cd || count == 0)
+		return -EINVAL;
+
+	cmd_buf = kmalloc(count + 1, GFP_KERNEL);
+	if (!cmd_buf)
+		return -ENOMEM;
+
+	if (copy_from_user(cmd_buf, buf, count)) {
+		kfree(cmd_buf);
+		return -EFAULT;
+	}
+	cmd_buf[count] = '\0';
+
+	if (cmd_buf[0] == '0') {
+		tp_720hz_mode = 0;
+		if (cd->hw_ops && cd->hw_ops->send_cmd) {
+			ret = cd->hw_ops->send_cmd(cd, &exit_720hz_cmd);
+			if (ret < 0)
+				ts_err("exit 720hz fail\n\n");
+		}
+	} else {
+		tp_720hz_mode = 1;
+		if (cd->hw_ops && cd->hw_ops->send_cmd) {
+			ret = cd->hw_ops->send_cmd(cd, &enter_720hz_cmd);
+			if (ret < 0)
+				ts_err("enter 720hz fail\n\n");
+		}
+	}
+
+	kfree(cmd_buf);
+	return count;
+}
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0))
+static const struct proc_ops tp_720hz_fops = {
+	.proc_open = goodix_ts_720hz_open,
+	.proc_read = seq_read,
+	.proc_write = goodix_ts_720hz_store,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+};
+#else
+static const struct file_operations tp_720hz_fops = {
+	.open = goodix_ts_720hz_open,
+	.read = seq_read,
+	.write = goodix_ts_720hz_store,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+#endif
+
 static void goodix_ts_procfs_init(struct goodix_ts_core *core_data)
 {
 	struct proc_dir_entry *proc_entry;
@@ -904,10 +1040,13 @@ static void goodix_ts_procfs_init(struct goodix_ts_core *core_data)
 			0664, NULL, &rawdata_proc_fops, core_data);
 	if (!proc_entry)
 		ts_err("failed to create proc entry");
+
+	proc_create_data("tp_720hz", 0664, NULL, &tp_720hz_fops, core_data);
 }
 
 static void goodix_ts_procfs_exit(struct goodix_ts_core *core_data)
 {
+	remove_proc_entry("tp_720hz", NULL);
 	remove_proc_entry("goodix_ts/tp_capacitance_data", NULL);
 	remove_proc_entry("goodix_ts", NULL);
 }
@@ -1874,6 +2013,26 @@ out:
 
 #if defined(CONFIG_DRM)
 
+static void goodix_resume_work(struct work_struct *work)
+{
+	struct goodix_ts_core *core_data = container_of(work, struct goodix_ts_core, resume_work);
+
+	goodix_ts_resume(core_data);
+	ts_info("tp_720hz_mode =%d\n", tp_720hz_mode);
+	if (tp_720hz_mode == 1) {
+		if (core_data->hw_ops && core_data->hw_ops->send_cmd)
+			core_data->hw_ops->send_cmd(core_data, &enter_720hz_cmd);
+	}
+	if (!is_default_edge_inhibition())
+		set_edge_inhibition(core_data);
+	if (is_charger_mode())
+		enter_charger_mode(core_data);
+	if (is_tp_game_sensitivity())
+		enter_tp_game_sensitivity(core_data);
+	if (is_tp_idle_1500hz())
+		enter_tp_idle_1500hz(core_data);
+}
+
 static void goodix_panel_notifier_callback(enum panel_event_notifier_tag tag,
 		 struct panel_event_notification *notification, void *client_data)
 {
@@ -1884,18 +2043,24 @@ static void goodix_panel_notifier_callback(enum panel_event_notifier_tag tag,
 		return;
 	}
 
-	ts_debug("Notification type:%d, early_trigger:%d",
-			notification->notif_type,
-			notification->notif_data.early_trigger);
+	if (debug_log_flag)
+		ts_info("Notification type:%d, early_trigger:%d\n",
+				notification->notif_type,
+				notification->notif_data.early_trigger);
+
 	switch (notification->notif_type) {
 	case DRM_PANEL_EVENT_UNBLANK:
-		if (!notification->notif_data.early_trigger)
-			goodix_ts_resume(core_data);
+		if (!notification->notif_data.early_trigger) {
+			if (core_data->event_wq)
+				queue_work(core_data->event_wq, &core_data->resume_work);
+		}
 		break;
 
 	case DRM_PANEL_EVENT_BLANK:
-		if (notification->notif_data.early_trigger)
+		if (notification->notif_data.early_trigger) {
+			cancel_work_sync(&core_data->resume_work);
 			goodix_ts_suspend(core_data);
+		}
 		break;
 
 	case DRM_PANEL_EVENT_BLANK_LP:
@@ -2031,8 +2196,10 @@ int goodix_ts_stage2_init(struct goodix_ts_core *cd)
 	ts_info("success register irq");
 
 #if defined(CONFIG_DRM)
-	if (cd->touch_environment && !strcmp(cd->touch_environment, "pvm"))
-		goodix_register_for_panel_events(cd->bus->dev->of_node, cd);
+	INIT_WORK(&cd->resume_work, goodix_resume_work);
+	INIT_DELAYED_WORK(&cd->drm_work, drm_register_work);
+	cd->event_wq = create_singlethread_workqueue("goodix_event_wq");
+	queue_delayed_work(system_wq, &cd->drm_work, 0);
 
 #elif defined(CONFIG_FB)
 	cd->fb_notifier.notifier_call = goodix_ts_fb_notifier_callback;
@@ -2088,6 +2255,36 @@ static int goodix_send_ic_config(struct goodix_ts_core *cd, int type)
 	return cd->hw_ops->send_config(cd, cfg->data, cfg->len);
 }
 
+static const u8 panel_0_id[8] = { 0x53, 0x42, 0x31, 0x31, 0x10, 0x0a, 0x31, 0x00 };
+static const u8 panel_1_id[8] = { 0x32, 0x36, 0x31, 0x31, 0x10, 0x0a, 0x31, 0x00 };
+
+static void goodix_match_panel(struct goodix_ts_core *cd)
+{
+	u8 buf[8] = {0};
+	int ret;
+
+	strlcpy(cd->board_data.cfg_bin_name, "goodix_cfg_group.bin", sizeof(cd->board_data.cfg_bin_name));
+	strlcpy(cd->board_data.fw_name, "goodix_firmware.bin", sizeof(cd->board_data.fw_name));
+
+	if (cd->hw_ops && cd->hw_ops->read) {
+		ret = cd->hw_ops->read(cd, 0x10030, buf, sizeof(buf));
+		if (ret < 0) {
+			ts_info("failed to read panel id\n");
+			return;
+		}
+	}
+
+	if (!memcmp(buf, panel_0_id, sizeof(panel_0_id))) {
+		ts_info("match panel 0\n");
+	} else if (!memcmp(buf, panel_1_id, sizeof(panel_1_id))) {
+		ts_info("match panel 1\n");
+		strlcpy(cd->board_data.cfg_bin_name, "goodix_cfg_group_1.bin", sizeof(cd->board_data.cfg_bin_name));
+		strlcpy(cd->board_data.fw_name, "goodix_firmware_1.bin", sizeof(cd->board_data.fw_name));
+	} else {
+		ts_info("can't match valid panel[%*ph], use panel 0\n", 8, buf);
+	}
+}
+
 /**
  * goodix_later_init_thread - init IC fw and config
  * @data: point to goodix_ts_core
@@ -2109,6 +2306,8 @@ static int goodix_later_init_thread(void *data)
 		update_flag |= UPDATE_MODE_FORCE;
 		goto upgrade;
 	}
+
+	goodix_match_panel(cd);
 
 	/* step 2: get config data from config bin */
 	ret = goodix_get_config_proc(cd);
@@ -2361,6 +2560,8 @@ static int goodix_ts_probe(struct platform_device *pdev)
 	/* Try start a thread to get config-bin info */
 	goodix_start_later_init(core_data);
 
+	tp_gesture_ctl_class(core_data);
+
 	ts_info("goodix_ts_core probe success");
 	return 0;
 
@@ -2388,6 +2589,10 @@ static int goodix_ts_remove(struct platform_device *pdev)
 		hw_ops->irq_enable(core_data, false);
 
 	#if defined(CONFIG_DRM)
+		cancel_delayed_work_sync(&core_data->drm_work);
+		cancel_work_sync(&core_data->resume_work);
+		if (core_data->event_wq)
+			destroy_workqueue(core_data->event_wq);
 		if (core_data->notifier_cookie)
 			panel_event_notifier_unregister(core_data->notifier_cookie);
 	#elif IS_ENABLED(CONFIG_FB)

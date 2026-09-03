@@ -414,7 +414,6 @@ int gesture_module_init(void)
 	}
 
 	module_initialized = true;
-	goodix_register_ext_module_no_wait(&gsx_gesture->module);
 	ts_info("gesture module init success");
 
 	return 0;
@@ -424,6 +423,34 @@ err_out:
 	kfree(gsx_gesture);
 	return ret;
 }
+
+int goodix_gesture_enable(int enable)
+{
+	int ret = 0;
+
+	if (!module_initialized || !gsx_gesture)
+		return 0;
+
+	if (enable) {
+		if (atomic_read(&gsx_gesture->registered)) {
+			ts_info("%s: gesture module has been already registered\n", __func__);
+			return 0;
+		}
+		ret = goodix_register_ext_module(&gsx_gesture->module);
+		if (ret)
+			ts_err("%s: failed register gesture module\n", __func__);
+	} else {
+		if (!atomic_read(&gsx_gesture->registered)) {
+			ts_info("%s: gesture module has been already unregistered\n", __func__);
+			return 0;
+		}
+		ret = goodix_unregister_ext_module(&gsx_gesture->module);
+		if (ret)
+			ts_err("%s: failed unregister gesture module\n", __func__);
+	}
+	return ret;
+}
+EXPORT_SYMBOL(goodix_gesture_enable);
 
 void gesture_module_exit(void)
 {

@@ -16,6 +16,9 @@
  */
 #include "goodix_ts_core.h"
 
+int goodix_ts_fw_updating;
+EXPORT_SYMBOL(goodix_ts_fw_updating);
+
 #define BUS_TYPE_SPI					1
 #define BUS_TYPE_I2C					0
 
@@ -1101,12 +1104,57 @@ static ssize_t goodix_sysfs_result_show(
 	return r;
 }
 
+static ssize_t goodix_sysfs_fwsize_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct fw_update_ctrl *fw_ctrl = &goodix_fw_update_ctrl;
+	struct firmware *fw;
+
+	if (!fw_ctrl)
+		return -EINVAL;
+	fw = fw_ctrl->fw_data.fw_sysfs;
+	if (!fw)
+		return -EINVAL;
+
+	return snprintf(buf, PAGE_SIZE, "%zu\n", fw->size);
+}
+
+static ssize_t goodix_sysfs_fwsize_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct fw_update_ctrl *fw_ctrl = &goodix_fw_update_ctrl;
+	size_t fw_size = 0;
+	struct firmware *fw;
+
+	if (sscanf(buf, "%zu", &fw_size) < 0 || fw_size == 0) {
+		ts_err("failed get fw size or size is 0");
+		return -EFAULT;
+	}
+
+	fw = vmalloc(fw_size + sizeof(struct firmware));
+	if (!fw)
+		return -ENOMEM;
+
+	mutex_lock(&fw_ctrl->mutex);
+	memset(fw, 0, fw_size + sizeof(struct firmware));
+	fw->size = fw_size;
+	fw->data = (u8 *)fw + sizeof(struct firmware);
+	fw_ctrl->fw_data.fw_sysfs = fw;
+	fw_ctrl->mode = 16;
+	mutex_unlock(&fw_ctrl->mutex);
+
+	return count;
+}
+
 static DEVICE_ATTR(update_en, 0220, NULL, goodix_sysfs_update_en_store);
 static DEVICE_ATTR(result, 0664, goodix_sysfs_result_show, NULL);
+static DEVICE_ATTR(fwsize, 0664, goodix_sysfs_fwsize_show, goodix_sysfs_fwsize_store);
 
 static struct attribute *goodix_fwu_attrs[] = {
 	&dev_attr_update_en.attr,
-	&dev_attr_result.attr
+	&dev_attr_result.attr,
+	&dev_attr_fwsize.attr,
+	NULL
 };
 
 static int goodix_fw_sysfs_init(struct goodix_ts_core *core_data,
@@ -1218,6 +1266,7 @@ static int goodix_fw_update_thread(void *data)
 	start = ktime_get();
 	fwu_ctrl->spend_time = 0;
 	fwu_ctrl->status = UPSTA_NOTWORK;
+	goodix_ts_fw_updating = 1;
 	mutex_lock(&fwu_ctrl->mutex);
 
 	ts_debug("notify update start");
@@ -1265,6 +1314,7 @@ static int goodix_fw_update_thread(void *data)
 out:
 	fwu_ctrl->mode = UPDATE_MODE_DEFAULT;
 	mutex_unlock(&fwu_ctrl->mutex);
+	goodix_ts_fw_updating = 0;
 
 	if (r) {
 		ts_err("fw update failed, %d", r);

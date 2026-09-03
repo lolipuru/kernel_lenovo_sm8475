@@ -507,6 +507,9 @@ struct goodix_ts_core {
 	struct notifier_block fb_notifier;
 	void *notifier_cookie;
 	const char *touch_environment;
+	struct workqueue_struct *event_wq;
+	struct work_struct resume_work;
+	struct delayed_work drm_work;
 #elif defined(CONFIG_FB)
 	struct notifier_block fb_notifier;
 #endif
@@ -685,6 +688,20 @@ void inspect_module_exit(void);
 int goodix_tools_init(void);
 void goodix_tools_exit(void);
 int goodix_ts_esd_init(struct goodix_ts_core *cd);
+int tp_gesture_ctl_class(struct goodix_ts_core *core_data);
+int goodix_gesture_enable(int enable);
+int enter_charger_mode(struct goodix_ts_core *cd);
+int exit_charger_mode(struct goodix_ts_core *cd);
+bool is_charger_mode(void);
+int set_edge_inhibition(struct goodix_ts_core *cd);
+bool is_default_edge_inhibition(void);
+int enter_tp_idle_1500hz(struct goodix_ts_core *cd);
+int exit_tp_idle_1500hz(struct goodix_ts_core *cd);
+bool is_tp_idle_1500hz(void);
+int enter_tp_game_sensitivity(struct goodix_ts_core *cd);
+int exit_tp_game_sensitivity(struct goodix_ts_core *cd);
+bool is_tp_game_sensitivity(void);
+int panel_orientation_mode(void);
 
 /* goodix FB test */
 /*
