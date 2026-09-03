@@ -26,6 +26,8 @@
 #include <linux/delay.h>
 #include <linux/atomic.h>
 #include <linux/input/mt.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 #include "goodix_ts_core.h"
 
 
@@ -48,14 +50,73 @@ struct gesture_module {
 	struct goodix_ext_module module;
 };
 
-static struct gesture_module *gsx_gesture; /*allocated in gesture init module*/
+static struct gesture_module *gsx_gesture; /* allocated in gesture init module */
 static bool module_initialized;
+extern struct goodix_module goodix_modules;
+
+/**
+ * to-do refactor this dead code, only used for gestures diag.
+ */
+
+static unsigned int halo_enable_calls;
+static unsigned int halo_suspend_calls;
+static unsigned int halo_irq_calls;
+static unsigned int halo_wake_events;
+
+static int halo_last_enable = -1;
+static int halo_last_enable_ret = -1;
+static int halo_last_gesture_ret = -1;
+static int halo_last_event_ret = -1;
+
+static unsigned int halo_last_event_type;
+static unsigned int halo_last_gesture_code;
+
+static int halo_gesture_diag_show(struct seq_file *m, void *unused)
+{
+	struct goodix_ts_core *cd = READ_ONCE(goodix_modules.core_data);
+
+	seq_printf(m, "initialized=%d registered=%d enable_calls=%u last_enable=%d enable_ret=%d\n",
+		   module_initialized,
+		   gsx_gesture ? atomic_read(&gsx_gesture->registered) : 0,
+		   halo_enable_calls,
+		   halo_last_enable,
+		   halo_last_enable_ret);
+
+	seq_printf(m, "core=%d suspended=%d mask=%u panel_registered=%d suspend_calls=%u gesture_ret=%d\n",
+		   cd != NULL,
+		   cd ? atomic_read(&cd->suspended) : -1,
+		   cd ? READ_ONCE(cd->gesture_type) : 0,
+		   cd ? !!READ_ONCE(cd->notifier_cookie) : 0,
+		   halo_suspend_calls,
+		   halo_last_gesture_ret);
+
+	seq_printf(m, "irq_calls=%u event_ret=%d event_type=%u gesture_code=%u wake_events=%u\n",
+		   halo_irq_calls,
+		   halo_last_event_ret,
+		   halo_last_event_type,
+		   halo_last_gesture_code,
+		   halo_wake_events);
+
+	return 0;
+}
+
+static int halo_gesture_diag_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, halo_gesture_diag_show, NULL);
+}
+
+static const struct proc_ops halo_gesture_diag_ops = {
+	.proc_open    = halo_gesture_diag_open,
+	.proc_read    = seq_read,
+	.proc_lseek   = seq_lseek,
+	.proc_release = single_release,
+};
 
 static ssize_t gsx_double_type_show(struct goodix_ext_module *module,
 		char *buf)
 {
 	struct gesture_module *gsx = module->priv_data;
-	unsigned char type = gsx->ts_core->gesture_type;
+	unsigned char type;
 
 	if (!gsx)
 		return -EIO;
@@ -64,6 +125,10 @@ static ssize_t gsx_double_type_show(struct goodix_ext_module *module,
 		ts_err("gesture module is not registered");
 		return 0;
 	}
+
+	if (!gsx->ts_core)
+		return -EIO;
+	type = gsx->ts_core->gesture_type;
 
 	return scnprintf(buf, PAGE_SIZE, "%s\n",
 			(type & GESTURE_DOUBLE_TAP) ? "enable" : "disable");
@@ -98,7 +163,7 @@ static ssize_t gsx_single_type_show(struct goodix_ext_module *module,
 		char *buf)
 {
 	struct gesture_module *gsx = module->priv_data;
-	unsigned char type = gsx->ts_core->gesture_type;
+	unsigned char type;
 
 	if (!gsx)
 		return -EIO;
@@ -107,6 +172,10 @@ static ssize_t gsx_single_type_show(struct goodix_ext_module *module,
 		ts_err("gesture module is not registered");
 		return 0;
 	}
+
+	if (!gsx->ts_core)
+		return -EIO;
+	type = gsx->ts_core->gesture_type;
 
 	return scnprintf(buf, PAGE_SIZE, "%s\n",
 			(type & GESTURE_SINGLE_TAP) ? "enable" : "disable");
@@ -141,7 +210,7 @@ static ssize_t gsx_fod_type_show(struct goodix_ext_module *module,
 		char *buf)
 {
 	struct gesture_module *gsx = module->priv_data;
-	unsigned char type = gsx->ts_core->gesture_type;
+	unsigned char type;
 
 	if (!gsx)
 		return -EIO;
@@ -150,6 +219,10 @@ static ssize_t gsx_fod_type_show(struct goodix_ext_module *module,
 		ts_err("gesture module is not registered");
 		return 0;
 	}
+
+	if (!gsx->ts_core)
+		return -EIO;
+	type = gsx->ts_core->gesture_type;
 
 	return scnprintf(buf, PAGE_SIZE, "%s\n",
 			(type & GESTURE_FOD_PRESS) ? "enable" : "disable");
@@ -201,6 +274,7 @@ static int gsx_gesture_init(struct goodix_ts_core *cd,
 	}
 
 	gsx->ts_core = cd;
+	gsx->ts_core->gesture_type = GESTURE_DOUBLE_TAP;
 	gsx->ts_core->gesture_type = 0;
 	atomic_set(&gsx->registered, 1);
 
@@ -242,7 +316,11 @@ static int gsx_gesture_ist(struct goodix_ts_core *cd,
 	if (atomic_read(&cd->suspended) == 0 || cd->gesture_type == 0)
 		return EVT_CONTINUE;
 
+	halo_irq_calls++;
 	ret = hw_ops->event_handler(cd, &gs_event);
+	halo_last_event_ret = ret;
+	halo_last_event_type = gs_event.event_type;
+	halo_last_gesture_code = gs_event.gesture_type;
 	if (ret) {
 		ts_err("failed get gesture data");
 		goto re_send_ges_cmd;
@@ -271,6 +349,7 @@ static int gsx_gesture_ist(struct goodix_ts_core *cd,
 	case GOODIX_GESTURE_DOUBLE_TAP:
 		if (cd->gesture_type & GESTURE_DOUBLE_TAP) {
 			ts_info("get DOUBLE-TAP gesture");
+			halo_wake_events++;
 			input_report_key(cd->input_dev, KEY_WAKEUP, 1);
 			input_sync(cd->input_dev);
 			input_report_key(cd->input_dev, KEY_WAKEUP, 0);
@@ -337,10 +416,13 @@ static int gsx_gesture_before_suspend(struct goodix_ts_core *cd,
 	int ret;
 	const struct goodix_ts_hw_ops *hw_ops = cd->hw_ops;
 
+	halo_suspend_calls++;
+
 	if (cd->gesture_type == 0)
 		return EVT_CONTINUE;
 
 	ret = hw_ops->gesture(cd, 0);
+	halo_last_gesture_ret = ret;
 	if (ret)
 		ts_err("failed enter gesture mode");
 	else
@@ -414,7 +496,8 @@ int gesture_module_init(void)
 	}
 
 	module_initialized = true;
-	goodix_register_ext_module_no_wait(&gsx_gesture->module);
+	if (!proc_create("halo_touch_diag", 0444, NULL, &halo_gesture_diag_ops))
+		ts_err("failed create gesture diagnostic node");
 	ts_info("gesture module init success");
 
 	return 0;
@@ -425,6 +508,38 @@ err_out:
 	return ret;
 }
 
+int goodix_gesture_enable(int enable)
+{
+	int ret = 0;
+	halo_enable_calls++;
+	halo_last_enable = enable;
+	halo_last_enable_ret = (!module_initialized || !gsx_gesture) ? -EAGAIN : 0;
+
+	if (!module_initialized || !gsx_gesture)
+		return 0;
+
+	if (enable) {
+		if (atomic_read(&gsx_gesture->registered)) {
+			ts_info("%s: gesture module has been already registered\n", __func__);
+			return 0;
+		}
+		ret = goodix_register_ext_module(&gsx_gesture->module);
+		if (ret)
+			ts_err("%s: failed register gesture module\n", __func__);
+	} else {
+		if (!atomic_read(&gsx_gesture->registered)) {
+			ts_info("%s: gesture module has been already unregistered\n", __func__);
+			return 0;
+		}
+		ret = goodix_unregister_ext_module(&gsx_gesture->module);
+		if (ret)
+			ts_err("%s: failed unregister gesture module\n", __func__);
+	}
+	halo_last_enable_ret = ret;
+	return ret;
+}
+EXPORT_SYMBOL(goodix_gesture_enable);
+
 void gesture_module_exit(void)
 {
 	int i;
@@ -433,6 +548,7 @@ void gesture_module_exit(void)
 	if (!module_initialized)
 		return;
 
+	remove_proc_entry("halo_touch_diag", NULL);
 	goodix_unregister_ext_module(&gsx_gesture->module);
 
 	/* deinit sysfs */

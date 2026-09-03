@@ -16,6 +16,9 @@
  */
 #include "goodix_ts_core.h"
 
+int goodix_ts_fw_updating;
+EXPORT_SYMBOL(goodix_ts_fw_updating);
+
 #define BUS_TYPE_SPI					1
 #define BUS_TYPE_I2C					0
 
@@ -1101,18 +1104,67 @@ static ssize_t goodix_sysfs_result_show(
 	return r;
 }
 
+static ssize_t goodix_sysfs_fwsize_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct fw_update_ctrl *fw_ctrl = &goodix_fw_update_ctrl;
+	struct firmware *fw;
+
+	if (!fw_ctrl)
+		return -EINVAL;
+	fw = fw_ctrl->fw_data.fw_sysfs;
+	if (!fw)
+		return -EINVAL;
+
+	return snprintf(buf, PAGE_SIZE, "%zu\n", fw->size);
+}
+
+static ssize_t goodix_sysfs_fwsize_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct fw_update_ctrl *fw_ctrl = &goodix_fw_update_ctrl;
+	size_t fw_size = 0;
+	struct firmware *fw;
+
+	if (sscanf(buf, "%zu", &fw_size) < 0 || fw_size == 0) {
+		ts_err("failed get fw size or size is 0");
+		return -EFAULT;
+	}
+
+	fw = vmalloc(fw_size + sizeof(struct firmware));
+	if (!fw)
+		return -ENOMEM;
+
+	mutex_lock(&fw_ctrl->mutex);
+	memset(fw, 0, fw_size + sizeof(struct firmware));
+	fw->size = fw_size;
+	fw->data = (u8 *)fw + sizeof(struct firmware);
+	fw_ctrl->fw_data.fw_sysfs = fw;
+	fw_ctrl->mode = 16;
+	mutex_unlock(&fw_ctrl->mutex);
+
+	return count;
+}
+
 static DEVICE_ATTR(update_en, 0220, NULL, goodix_sysfs_update_en_store);
 static DEVICE_ATTR(result, 0664, goodix_sysfs_result_show, NULL);
+static DEVICE_ATTR(fwsize, 0664, goodix_sysfs_fwsize_show, goodix_sysfs_fwsize_store);
 
 static struct attribute *goodix_fwu_attrs[] = {
 	&dev_attr_update_en.attr,
-	&dev_attr_result.attr
+	&dev_attr_result.attr,
+	&dev_attr_fwsize.attr,
+	NULL
+};
+
+static const struct attribute_group goodix_fwu_attr_group = {
+	.attrs = goodix_fwu_attrs,
 };
 
 static int goodix_fw_sysfs_init(struct goodix_ts_core *core_data,
 		struct fw_update_ctrl *fw_ctrl)
 {
-	int ret = 0, i;
+	int ret;
 
 	fw_ctrl->kobj = kobject_create_and_add("fwupdate",
 					&core_data->pdev->dev.kobj);
@@ -1121,16 +1173,12 @@ static int goodix_fw_sysfs_init(struct goodix_ts_core *core_data,
 		return -EINVAL;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(goodix_fwu_attrs) && !ret; i++)
-		ret = sysfs_create_file(fw_ctrl->kobj, goodix_fwu_attrs[i]);
+	ret = sysfs_create_group(fw_ctrl->kobj, &goodix_fwu_attr_group);
 
 	if (ret) {
-		ts_err("failed create fwu sysfs files");
-		while (--i >= 0)
-			sysfs_remove_file(fw_ctrl->kobj, goodix_fwu_attrs[i]);
+		ts_err("failed create fwu sysfs files, %d", ret);
+		goto put_kobject;
 
-		kobject_put(fw_ctrl->kobj);
-		return -EINVAL;
 	}
 
 	fw_ctrl->attr_fwimage.attr.name = "fwimage";
@@ -1140,26 +1188,28 @@ static int goodix_fw_sysfs_init(struct goodix_ts_core *core_data,
 	ret = sysfs_create_bin_file(fw_ctrl->kobj, &fw_ctrl->attr_fwimage);
 	if (ret) {
 		ts_err("failed create fwimage bin node, %d", ret);
-		for (i = 0; i < ARRAY_SIZE(goodix_fwu_attrs); i++)
-			sysfs_remove_file(fw_ctrl->kobj, goodix_fwu_attrs[i]);
-		kobject_put(fw_ctrl->kobj);
+		sysfs_remove_group(fw_ctrl->kobj, &goodix_fwu_attr_group);
+		goto put_kobject;
 	}
 
+	return 0;
+
+put_kobject:
+	kobject_put(fw_ctrl->kobj);
+	fw_ctrl->kobj = NULL;
 	return ret;
 }
 
 static void goodix_fw_sysfs_remove(void)
 {
 	struct fw_update_ctrl *fw_ctrl = &goodix_fw_update_ctrl;
-	int i;
+	if (!fw_ctrl->kobj)
+		return;
 
 	sysfs_remove_bin_file(fw_ctrl->kobj, &fw_ctrl->attr_fwimage);
-
-	for (i = 0; i < ARRAY_SIZE(goodix_fwu_attrs); i++)
-		sysfs_remove_file(fw_ctrl->kobj,
-				goodix_fwu_attrs[i]);
-
+	sysfs_remove_group(fw_ctrl->kobj, &goodix_fwu_attr_group);
 	kobject_put(fw_ctrl->kobj);
+	fw_ctrl->kobj = NULL;
 }
 
 
@@ -1218,6 +1268,7 @@ static int goodix_fw_update_thread(void *data)
 	start = ktime_get();
 	fwu_ctrl->spend_time = 0;
 	fwu_ctrl->status = UPSTA_NOTWORK;
+	goodix_ts_fw_updating = 1;
 	mutex_lock(&fwu_ctrl->mutex);
 
 	ts_debug("notify update start");
@@ -1265,6 +1316,7 @@ static int goodix_fw_update_thread(void *data)
 out:
 	fwu_ctrl->mode = UPDATE_MODE_DEFAULT;
 	mutex_unlock(&fwu_ctrl->mutex);
+	goodix_ts_fw_updating = 0;
 
 	if (r) {
 		ts_err("fw update failed, %d", r);
