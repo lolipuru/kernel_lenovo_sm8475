@@ -2753,6 +2753,45 @@ static ssize_t cali_store(struct device *dev, struct device_attribute *attr,
 	return count;
 }
 
+#ifdef CONFIG_TARGET_PRODUCT_HALO
+static ssize_t cali_lra_show(struct device *dev, struct device_attribute *attr,
+			     char *buf)
+{
+	cdev_t *cdev = dev_get_drvdata(dev);
+	struct aw_haptic *aw_haptic = container_of(cdev, struct aw_haptic,
+						   vib_dev);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", aw_haptic->f0_cali_data);
+}
+
+static ssize_t cali_lra_store(struct device *dev, struct device_attribute *attr,
+			      const char *buf, size_t count)
+{
+	cdev_t *cdev = dev_get_drvdata(dev);
+	struct aw_haptic *aw_haptic = container_of(cdev, struct aw_haptic,
+						   vib_dev);
+	uint32_t val = 0;
+	int rc = 0;
+
+	rc = kstrtouint(buf, 0, &val);
+	if (rc < 0)
+		return rc;
+	if (!val)
+		return count;
+
+	aw_info("val = %d", val);
+	mutex_lock(&aw_haptic->lock);
+	if ((u8)val != 0xff) {
+		aw_haptic->f0_cali_data = (u8)val;
+		aw_haptic->func->upload_lra(aw_haptic, AW_F0_CALI_LRA);
+	} else {
+		f0_cali(aw_haptic);
+	}
+	mutex_unlock(&aw_haptic->lock);
+	return count;
+}
+#endif
+
 static ssize_t ram_cali_show(struct device *dev, struct device_attribute *attr,
 			 char *buf)
 {
@@ -3445,6 +3484,56 @@ static ssize_t dual_duration_store(struct device *dev,
 	return count;
 }
 
+#ifdef CONFIG_TARGET_PRODUCT_HALO
+static ssize_t haptic_dual_cancel_show(struct device *dev,
+				       struct device_attribute *attr, char *buf)
+{
+	cdev_t *cdev = dev_get_drvdata(dev);
+	struct aw_haptic *aw_haptic = container_of(cdev, struct aw_haptic,
+						   vib_dev);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", aw_haptic->state);
+}
+
+static ssize_t haptic_dual_cancel_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	cdev_t *cdev = dev_get_drvdata(dev);
+	struct aw_haptic *aw_haptic = container_of(cdev, struct aw_haptic,
+						   vib_dev);
+	uint32_t val = 0;
+	int rc = 0;
+
+	rc = kstrtouint(buf, 0, &val);
+	if (rc < 0)
+		return rc;
+
+	mutex_lock(&aw_haptic->lock);
+	if (left) {
+		hrtimer_cancel(&left->timer);
+		left->state = 0;
+		left->gain = 0x80;
+	}
+	if (right) {
+		hrtimer_cancel(&right->timer);
+		right->state = 0;
+		right->gain = 0x80;
+	}
+	mutex_unlock(&aw_haptic->lock);
+
+	if (left) {
+		left->activate_mode = 0;
+		left->func->play_stop(left);
+	}
+	if (right) {
+		right->activate_mode = 0;
+		right->func->play_stop(right);
+	}
+	return count;
+}
+#endif
+
 static ssize_t double_show(struct device *dev,
 				    struct device_attribute *attr, char *buf)
 {
@@ -3761,6 +3850,11 @@ static DEVICE_ATTR(dual_duration, S_IWUSR | S_IRUGO, dual_duration_show, dual_du
 static DEVICE_ATTR(double, S_IWUSR | S_IRUGO, double_show, double_store);
 static DEVICE_ATTR(dual_activate, S_IWUSR | S_IRUGO, dual_activate_show, dual_activate_store);
 static DEVICE_ATTR(dual_rtp, S_IWUSR | S_IRUGO, dual_rtp_show, dual_rtp_store);
+#ifdef CONFIG_TARGET_PRODUCT_HALO
+static DEVICE_ATTR(cali_lra, S_IWUSR | S_IRUGO, cali_lra_show, cali_lra_store);
+static DEVICE_ATTR(haptic_dual_cancel, S_IWUSR | S_IRUGO, haptic_dual_cancel_show, haptic_dual_cancel_store);
+static DEVICE_ATTR(double_duration, S_IWUSR | S_IRUGO, double_show, double_store);
+#endif
 #endif
 
 static struct attribute *vibrator_attributes[] = {
@@ -3803,6 +3897,11 @@ static struct attribute *vibrator_attributes[] = {
 	&dev_attr_double.attr,
 	&dev_attr_dual_activate.attr,
 	&dev_attr_dual_rtp.attr,
+#ifdef CONFIG_TARGET_PRODUCT_HALO
+	&dev_attr_cali_lra.attr,
+	&dev_attr_haptic_dual_cancel.attr,
+	&dev_attr_double_duration.attr,
+#endif
 #endif
 
 	NULL
