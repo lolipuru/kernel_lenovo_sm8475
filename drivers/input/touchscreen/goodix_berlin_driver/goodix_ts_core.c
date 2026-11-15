@@ -44,6 +44,17 @@ static int goodix_ts_register_for_panel_events(struct device_node *dp,
 	void *cookie;
 	const char *touch_environment = NULL;
 
+#ifdef CONFIG_TARGET_PRODUCT_HALO
+	if (of_property_read_string(dp, "goodix,touch-type", &touch_environment)) {
+		ts_err("No touch type\n");
+		return -EINVAL;
+	}
+
+	if (strcmp(touch_environment, "primary")) {
+		pr_err("Invalid touch type\n");
+		return -EINVAL;
+	}
+#else
 	if (of_property_read_string(dp, "qcom,touch-environment", &touch_environment)) {
 		ts_err("No touch type\n");
 		return -EINVAL;
@@ -53,6 +64,7 @@ static int goodix_ts_register_for_panel_events(struct device_node *dp,
 		pr_err("Invalid touch type\n");
 		return -EINVAL;
 	}
+#endif
 
 	cookie = panel_event_notifier_register(PANEL_EVENT_NOTIFICATION_PRIMARY,
 			PANEL_EVENT_NOTIFIER_CLIENT_PRIMARY_TOUCH, active_panel,
@@ -994,14 +1006,18 @@ static ssize_t goodix_ts_720hz_store(struct file *file, const char __user *buf,
 
 	if (cmd_buf[0] == '0') {
 		tp_720hz_mode = 0;
-		if (cd->hw_ops && cd->hw_ops->send_cmd) {
+		if (atomic_read(&cd->suspended)) {
+			ts_info("In suspend mode\n");
+		} else if (cd->hw_ops && cd->hw_ops->send_cmd) {
 			ret = cd->hw_ops->send_cmd(cd, &exit_720hz_cmd);
 			if (ret < 0)
 				ts_err("exit 720hz fail\n\n");
 		}
 	} else {
 		tp_720hz_mode = 1;
-		if (cd->hw_ops && cd->hw_ops->send_cmd) {
+		if (atomic_read(&cd->suspended)) {
+			ts_info("In suspend mode\n");
+		} else if (cd->hw_ops && cd->hw_ops->send_cmd) {
 			ret = cd->hw_ops->send_cmd(cd, &enter_720hz_cmd);
 			if (ret < 0)
 				ts_err("enter 720hz fail\n\n");
@@ -1474,6 +1490,14 @@ static int goodix_ts_power_init(struct goodix_ts_core *core_data)
 			core_data->avdd = NULL;
 			return ret;
 		}
+#ifdef CONFIG_TARGET_PRODUCT_HALO
+		regulator_set_voltage(core_data->avdd, 3000000, 3300000);
+		ret = regulator_set_load(core_data->avdd, 30000);
+		if (ret) {
+			ts_err("avdd regulator set_load failed ret=%d", ret);
+			return ret;
+		}
+#endif
 	} else
 		ts_info("Avdd name is NULL");
 
@@ -1485,6 +1509,14 @@ static int goodix_ts_power_init(struct goodix_ts_core *core_data)
 			ts_err("Failed to get regulator iovdd:%d", ret);
 			core_data->iovdd = NULL;
 		}
+#ifdef CONFIG_TARGET_PRODUCT_HALO
+		if (core_data->iovdd) {
+			regulator_set_voltage(core_data->iovdd, 1800000, 1800000);
+			ret = regulator_set_load(core_data->iovdd, 10000);
+			if (ret)
+				ts_err("vcc_i2c regulator set_load failed ret=%d", ret);
+		}
+#endif
 	} else
 		ts_info("iovdd name is NULL");
 
