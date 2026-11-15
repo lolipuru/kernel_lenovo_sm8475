@@ -217,6 +217,14 @@ static int cyccg_i2c_remove(struct i2c_client *client)
 	return cyccg_remove(&client->dev);
 }
 
+static void cyccg_i2c_shutdown(struct i2c_client *client)
+{
+	struct cyccg *cyccg = i2c_get_clientdata(client);
+
+	if (cyccg)
+		cyccg_shutdown(cyccg);
+}
+
 static const struct i2c_device_id cyccg_i2c_id_table[] = {
 	{ CYCCG_I2C_NAME, 0 },
 	{ },
@@ -239,6 +247,7 @@ static struct i2c_driver cyccg_i2c_driver = {
 
 	.probe = cyccg_i2c_probe,
 	.remove = cyccg_i2c_remove,
+	.shutdown = cyccg_i2c_shutdown,
 	.id_table = cyccg_i2c_id_table,
 };
 module_i2c_driver(cyccg_i2c_driver);

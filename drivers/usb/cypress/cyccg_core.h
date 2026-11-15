@@ -91,6 +91,7 @@ struct cyccg_platform_data {
 	enum hpi_dp_mode dp_mode;
 	int reset_gpio;		/* gpio pin for host reset CCGx ship. */
 	int intr_gpio;		/* gpio pin for CCGx chip notify host. */
+	struct regulator *vdda28;
 
 	/*
 	 * TODO(Customer):
@@ -122,6 +123,7 @@ struct cyccg {
 	enum cyccg_work_state device_init_work_state;
 	struct work_struct fw_work;
 	enum cyccg_work_state fw_work_state;
+	struct work_struct uevent_work;
 
 	/*
 	 * The instance operates on Device Specific Registers only
@@ -148,7 +150,23 @@ struct cyccg {
 	enum vdm_sop_type sysfs_port_sop_type;
 	u32 reg_addr;
 	size_t reg_size;
+	struct pinctrl *pinctrl;
+	struct pinctrl_state *cypress_ic2_reset_active;
+	struct pinctrl_state *cypress_ic2_int;
+	struct pinctrl *usb_logic_pinctrl;
+	struct pinctrl_state *usb_logic_active;
+	struct pinctrl_state *usb_logic_suspend;
+	struct pinctrl *vbus_status_pinctrl;
+	struct pinctrl_state *vbus_status_active;
+	struct pinctrl_state *vbus_status_suspend;
+	struct extcon_dev *extcon;
 };
+
+void cyccg_shutdown(struct cyccg *cyccg);
+int audio_switch_reg_notifier(struct notifier_block *nb);
+int audio_switch_unreg_notifier(struct notifier_block *nb);
+int audio_switch_reg_notifier_2(struct notifier_block *nb);
+int audio_switch_unreg_notifier_2(struct notifier_block *nb);
 
 void cyccg_device_init_work(struct work_struct *work);
 int cyccg_port_init(struct hpi_device *port);

@@ -3704,10 +3704,18 @@ void cyccg_auto_fw_update_work(struct work_struct *work)
 
 	cyccg_set_to_busying_state(&cyccg->hpi_dev, false);
 
+	static bool update;
+
 	spin_lock(&cyccg->slock);
 	cyccg->fw_work_state = CYCCG_WORK_STATE_NONE;
 	spin_unlock(&cyccg->slock);
 	fw_dbg("auto_fw_update done, %d\n", err);
+
+	if (cyccg->ccg_state.running_mode == CCG_FW_MODE_TYPE_APP && !update) {
+		fw_info("auto_fw1_update done, continue to update fw2\n");
+		update = true;
+		cyccg_queue_auto_fw_update(cyccg);
+	}
 
 	/*
 	 * Auto update FW image for attached CCG based Power Adapter or Cable

@@ -21,6 +21,10 @@
 #include <linux/interrupt.h>
 #include <linux/mutex.h>
 #include <linux/sched.h>
+#include <linux/extcon-provider.h>
+#include <linux/pinctrl/consumer.h>
+#include <linux/regulator/consumer.h>
+#include <linux/notifier.h>
 #include "cyccg_core.h"
 #include "customer_pd.h"
 
@@ -48,6 +52,141 @@ static irqreturn_t cyccg_device_detect_handler(int irq, void *dev_id);
 static irqreturn_t cyccg_irq_thread_handler(int irq, void *dev_id);
 static void cyccg_polling_timer_thread_handler(struct work_struct *work);
 
+static const unsigned int usbpd_extcon_cable[] = {
+	EXTCON_USB,
+	EXTCON_USB_HOST,
+	EXTCON_DISP_DP,
+	EXTCON_NONE,
+};
+
+static RAW_NOTIFIER_HEAD(audio_switch_notifier);
+static RAW_NOTIFIER_HEAD(audio_switch_notifier_2);
+static int audio_switch_state;
+static int audio_switch_state_2;
+static int ishost1;
+static int ishost2;
+static int isdevice;
+static int device_on;
+static int usb1_on;
+static int usb2_on;
+static int is_dp_mode;
+static int usb_notify;
+static int cur_usb_notify;
+
+int audio_switch_reg_notifier(struct notifier_block *nb)
+{
+	return raw_notifier_chain_register(&audio_switch_notifier, nb);
+}
+EXPORT_SYMBOL(audio_switch_reg_notifier);
+
+int audio_switch_unreg_notifier(struct notifier_block *nb)
+{
+	return raw_notifier_chain_unregister(&audio_switch_notifier, nb);
+}
+EXPORT_SYMBOL(audio_switch_unreg_notifier);
+
+int audio_switch_reg_notifier_2(struct notifier_block *nb)
+{
+	return raw_notifier_chain_register(&audio_switch_notifier_2, nb);
+}
+EXPORT_SYMBOL(audio_switch_reg_notifier_2);
+
+int audio_switch_unreg_notifier_2(struct notifier_block *nb)
+{
+	return raw_notifier_chain_unregister(&audio_switch_notifier_2, nb);
+}
+EXPORT_SYMBOL(audio_switch_unreg_notifier_2);
+
+static int cyccg_extcon_init(struct cyccg *cyccg)
+{
+	int err;
+
+	cyccg->extcon = devm_extcon_dev_allocate(cyccg->dev,
+						 usbpd_extcon_cable);
+	if (IS_ERR_OR_NULL(cyccg->extcon)) {
+		cyccg_err("Unable to allocate memory for extcon!\n");
+		return -ENOMEM;
+	}
+
+	err = devm_extcon_dev_register(cyccg->dev, cyccg->extcon);
+	if (err) {
+		cyccg_err("CCG4 failed to register extcon device\n");
+		return -1;
+	}
+
+	extcon_set_property_capability(cyccg->extcon, EXTCON_USB,
+				       EXTCON_PROP_USB_VBUS);
+	extcon_set_property_capability(cyccg->extcon, EXTCON_USB,
+				       EXTCON_PROP_USB_SS);
+	extcon_set_property_capability(cyccg->extcon, EXTCON_USB_HOST,
+				       EXTCON_PROP_USB_VBUS);
+	extcon_set_property_capability(cyccg->extcon, EXTCON_USB_HOST,
+				       EXTCON_PROP_USB_SS);
+	return 0;
+}
+
+static void start_usb_host(struct hpi_device *port, bool ss)
+{
+	struct cyccg *cyccg = port->cyccg;
+	char *port_name = port->pdport_name_addr->name;
+	union extcon_property_value val;
+
+	pr_info("CYCCG - %s, ss=%d, port_name = %s\n",
+		__func__, ss, port_name);
+
+	val.intval = port->status.type_c_polarity ? 1 : 0;
+	extcon_set_property(cyccg->extcon, EXTCON_USB_HOST,
+			    EXTCON_PROP_USB_VBUS, val);
+	val.intval = ss ? 1 : 0;
+	extcon_set_property(cyccg->extcon, EXTCON_USB_HOST,
+			    EXTCON_PROP_USB_SS, val);
+	extcon_set_state_sync(cyccg->extcon, EXTCON_USB_HOST, 1);
+}
+
+static void stop_usb_host(struct hpi_device *port)
+{
+	struct cyccg *cyccg = port->cyccg;
+	char *port_name = port->pdport_name_addr->name;
+
+	pr_info("CYCCG - %s, port_name = %s\n", __func__, port_name);
+	extcon_set_state_sync(cyccg->extcon, EXTCON_USB_HOST, 0);
+}
+
+static void cyccg_usb_uevent_work(struct work_struct *work)
+{
+	struct cyccg *cyccg = container_of(work, struct cyccg, uevent_work);
+	char *envp[2] = { NULL, NULL };
+
+	envp[0] = kzalloc(64, GFP_KERNEL);
+	if (!envp[0])
+		return;
+
+	if (cur_usb_notify != usb_notify) {
+		sprintf(envp[0], "usb_event=%d", usb_notify);
+		pr_info("cyccg_usb_uevent_work\n");
+		kobject_uevent_env(&cyccg->dev->kobj, KOBJ_CHANGE, envp);
+		cur_usb_notify = usb_notify;
+	}
+
+	kfree(envp[0]);
+}
+
+void cyccg_shutdown(struct cyccg *cyccg)
+{
+	pr_info("cyccg_shutdown\n");
+	if (cyccg->pinctrl && cyccg->cypress_ic2_reset_active)
+		pinctrl_select_state(cyccg->pinctrl,
+				     cyccg->cypress_ic2_reset_active);
+	if (cyccg->usb_logic_pinctrl && cyccg->usb_logic_suspend)
+		pinctrl_select_state(cyccg->usb_logic_pinctrl,
+				     cyccg->usb_logic_suspend);
+	msleep(500);
+	if (cyccg->vbus_status_pinctrl && cyccg->vbus_status_suspend)
+		pinctrl_select_state(cyccg->vbus_status_pinctrl,
+				     cyccg->vbus_status_suspend);
+}
+EXPORT_SYMBOL(cyccg_shutdown);
+
 /**
  *****************************************************************************
  * Following functions are the key points that will be various on different
@@ -71,6 +210,16 @@ static int cyccg_dt_parse(struct device *dev, struct cyccg_platform_data *pdata)
 		of_get_named_gpio_flags(dev_node, "reset_gpio", 0, NULL);
 	pdata->intr_gpio =
 		of_get_named_gpio_flags(dev_node, "intr_gpio", 0, NULL);
+
+	pdata->vdda28 = devm_regulator_get(dev, "vdda28");
+	if (IS_ERR(pdata->vdda28)) {
+		pr_err("CCG4-unable to get vdda28 supply\n");
+		pdata->vdda28 = NULL;
+	} else {
+		err = regulator_enable(pdata->vdda28);
+		if (err)
+			pr_err("CCG4-Unable to enable vdda28:%d\n", err);
+	}
 
 	/*
 	 * TODO(Customer):
@@ -305,75 +454,89 @@ static int cyccg_pmic_control(struct hpi_device *port,
 static int cyccg_usb_mode_control(struct hpi_device *port,
 		enum usbc_pdport_mode usb_mode)
 {
+	struct cyccg *cyccg = port->cyccg;
 	char *port_name = port->pdport_name_addr->name;
 	int err = 0;
 
 	cyccg_port_vdbg(">>>> enter\n", port);
 
-	(void)port_name;	/* Suppress compile warning. */
 	switch (usb_mode) {
 	case USB_DRP:
 		cyccg_port_dbg("set usb_mode to USB_DRP\n", port);
-		/*
-		 * TODO (Customer):
-		 * Notify the USB module to set the USB port to OTG host and
-		 * device mode, and other required status.
-		 * When mulit-ports exists, the port_name can be sent and used
-		 * to identify which USB Type-C port it command should be sent
-		 * to.
-		 */
+		if (!strcmp(port_name, "USBC_PDPORT_1")) {
+			if (ishost1 && !ishost2)
+				stop_usb_host(port);
+			ishost1 = 0;
+			usb1_on = 0;
+		} else if (!strcmp(port_name, "USBC_PDPORT_2")) {
+			if (ishost2 && !ishost1)
+				stop_usb_host(port);
+			ishost2 = 0;
+			usb2_on = 0;
+		}
+		isdevice = 0;
+		device_on = 0;
+		usb_notify = 0;
+		cur_usb_notify = 0;
 		break;
 	case USB_DFP:
 		cyccg_port_dbg("set usb_mode to USB_DFP\n", port);
-		/*
-		 * TODO (Customer):
-		 * Notify the USB module to set the USB port to OTG host mode
-		 * and other required status.
-		 * When mulit-ports exists, the port_name can be sent and used
-		 * to identify which USB Type-C port it command should be sent
-		 * to.
-		 */
+		if (!device_on) {
+			if (!strcmp(port_name, "USBC_PDPORT_1")) {
+				start_usb_host(port, true);
+				ishost1 = 1;
+				usb1_on = 1;
+			} else if (!strcmp(port_name, "USBC_PDPORT_2")) {
+				start_usb_host(port, true);
+				ishost2 = 1;
+				usb2_on = 1;
+			}
+		}
 		break;
 	case USB_UFP:
-		cyccg_port_dbg("set usb_mode to USB_UFP\n", port);
-		/*
-		 * TODO (Customer):
-		 * Notify the USB module to set the USB port to OTG device mode
-		 * and other required status.
-		 * When mulit-ports exists, the port_name can be sent and used
-		 * to identify which USB Type-C port it command should be sent
-		 * to.
-		 */
+		pr_info("CCG:set usb_mode to USB_UFP: port_name = %s\n",
+			port_name);
+		if (!strcmp(port_name, "USBC_PDPORT_1")) {
+			if (usb2_on) {
+				pr_info("cyccg_usb_mode_control:send_uevent,usb2 host,usb1 charger\n");
+				usb_notify = 1;
+				schedule_work(&cyccg->uevent_work);
+			} else {
+				isdevice = 1;
+				device_on = 1;
+			}
+		} else if (!strcmp(port_name, "USBC_PDPORT_2")) {
+			if (usb1_on) {
+				pr_info("cyccg_usb_mode_control:send_uevent,usb1 host,usb2 charger\n");
+				usb_notify = 1;
+				schedule_work(&cyccg->uevent_work);
+			} else {
+				isdevice = 1;
+				device_on = 1;
+			}
+		}
 		break;
 	case USB_DEBUG:
 		cyccg_port_dbg("set usb_mode to USB_DEBUG\n", port);
-		/*
-		 * TODO (Customer):
-		 * Notify the USB module to set to debug accessory mode.
-		 * When mulit-ports exists, the port_name can be sent and used
-		 * to identify which USB Type-C port it command should be sent
-		 * to.
-		 */
 		break;
 	case USB_AUDIO:
 		cyccg_port_dbg("set usb_mode to USB_AUDIO\n", port);
-		/*
-		 * TODO (Customer):
-		 * Notify the USB module to set to audio accessory mode.
-		 * When mulit-ports exists, the port_name can be sent and used
-		 * to identify which USB Type-C port it command should be sent
-		 * to.
-		 */
+		if (!strcmp(port_name, "USBC_PDPORT_1")) {
+			audio_switch_state = 2;
+			raw_notifier_call_chain(&audio_switch_notifier,
+						audio_switch_state, NULL);
+			pr_info("fusb %s:%d  headset plug port_name=%s\n",
+				__func__, __LINE__, port_name);
+		} else if (!strcmp(port_name, "USBC_PDPORT_2")) {
+			audio_switch_state_2 = 2;
+			raw_notifier_call_chain(&audio_switch_notifier_2,
+						audio_switch_state_2, NULL);
+			pr_info("fusb %s:%d  headset plug port_name=%s\n",
+				__func__, __LINE__, port_name);
+		}
 		break;
 	case USB_POWERED:
 		cyccg_port_dbg("set usb_mode to USB_POWERED\n", port);
-		/*
-		 * TODO (Customer):
-		 * Notify the USB module to set to power accessory mode.
-		 * When mulit-ports exists, the port_name can be sent and used
-		 * to identify which USB Type-C port it command should be sent
-		 * to.
-		 */
 		break;
 	default:
 		cyccg_port_dbg("error: unknown usb_mode = %d\n",
@@ -407,7 +570,31 @@ static int cyccg_pmic_usb_mode_sync(struct hpi_device *port,
 	 */
 	if (!port_status->type_c_connected &&
 			!port_status->contract_established) {
+		char *port_name = port->pdport_name_addr->name;
+
 		cyccg_port_dbg("cable unplugged\n", port);
+		if (!port_name) {
+			pr_info("fusb %s:headset error recognize port_name\n",
+				__func__);
+		} else if (!strcmp(port_name, "USBC_PDPORT_1")) {
+			if (audio_switch_state == 2) {
+				pr_info("headset audio_switch_state 0\n");
+				audio_switch_state = 0;
+				raw_notifier_call_chain(&audio_switch_notifier,
+							0, NULL);
+				pr_info("fusb %s:%d  headset unplug port_name=%s\n",
+					__func__, __LINE__, port_name);
+			}
+		} else if (!strcmp(port_name, "USBC_PDPORT_2")) {
+			if (audio_switch_state_2 == 2) {
+				pr_info("headset audio_switch_state_2 0\n");
+				audio_switch_state_2 = 0;
+				raw_notifier_call_chain(&audio_switch_notifier_2,
+							0, NULL);
+				pr_info("fusb %s:%d  headset unplug port_name=%s\n",
+					__func__, __LINE__, port_name);
+			}
+		}
 
 		err = cyccg_pmic_control(port,
 				false, voltage_mV, current_mA);
@@ -2580,11 +2767,22 @@ static int cyccg_hpi_device_handler(struct hpi_device *hpidev)
 		goto out;
 	}
 
-	/*
-	 * TODO (Customer):
-	 * More message process can be added intothe following function.
-	 */
 	cyccg_hpi_message_default_handler(hpidev, msg);
+
+	if (hpidev->dev_type >= HPI_DEV_TYPE_PORT &&
+			msg->code == HPI_PD_RESP_VDM_RECEIVED) {
+		char *port_name = hpidev->pdport_name_addr->name;
+
+		pr_info("HPI_PD_RESP_VDM_RECEIVED, port_name=%s\n", port_name);
+		if (!strcmp(port_name, "USBC_PDPORT_1")) {
+			if (!usb2_on)
+				is_dp_mode = 1;
+		} else if (!strcmp(port_name, "USBC_PDPORT_2")) {
+			pr_info("CCG4_VDM_RECEIVED:send_uevent\n");
+			usb_notify = 2;
+			schedule_work(&hpidev->cyccg->uevent_work);
+		}
+	}
 
 	if (hpidev->dev_type >= HPI_DEV_TYPE_PORT &&
 			IS_HPI_PD_EVENT_CODE(msg->code))
@@ -2660,6 +2858,107 @@ out:
 	return IRQ_HANDLED;
 }
 
+static int cyccg_pinctrl_lookup_pair(struct device *dev,
+				     struct pinctrl **pinctrl_out,
+				     const char *state1_name,
+				     struct pinctrl_state **state1_out,
+				     const char *state2_name,
+				     struct pinctrl_state **state2_out,
+				     const char *tag)
+{
+	struct pinctrl *pctrl;
+	struct pinctrl_state *s1, *s2;
+	int ret;
+
+	pctrl = devm_pinctrl_get(dev);
+	if (IS_ERR_OR_NULL(pctrl)) {
+		ret = PTR_ERR(pctrl);
+		pr_info("%s does not use pinctrl %d\n", tag, ret);
+		*pinctrl_out = NULL;
+		return ret;
+	}
+
+	s1 = pinctrl_lookup_state(pctrl, state1_name);
+	if (IS_ERR_OR_NULL(s1)) {
+		ret = PTR_ERR(s1);
+		pr_err("%s can not lookup %s pinstate %d\n",
+		       tag, state1_name, ret);
+		goto err_put;
+	}
+
+	s2 = pinctrl_lookup_state(pctrl, state2_name);
+	if (IS_ERR_OR_NULL(s2)) {
+		ret = PTR_ERR(s2);
+		pr_err("%s can not lookup %s pinstate %d\n",
+		       tag, state2_name, ret);
+		goto err_put;
+	}
+
+	*pinctrl_out = pctrl;
+	*state1_out = s1;
+	*state2_out = s2;
+	return 0;
+
+err_put:
+	devm_pinctrl_put(pctrl);
+	*pinctrl_out = NULL;
+	return ret;
+}
+
+static int cyccg_i2c_pinctrl_init(struct cyccg *cyccg)
+{
+	int ret;
+
+	ret = cyccg_pinctrl_lookup_pair(cyccg->dev, &cyccg->pinctrl,
+					"cypress_ic2_reset_active",
+					&cyccg->cypress_ic2_reset_active,
+					"cypress_ic2_int",
+					&cyccg->cypress_ic2_int,
+					"cyccg");
+	if (!ret) {
+		ret = pinctrl_select_state(cyccg->pinctrl,
+					   cyccg->cypress_ic2_reset_active);
+		if (ret < 0)
+			pr_info("%s: Failed to select %s pinstate %d\n",
+				__func__, "cypress_ic2_reset_active", ret);
+		ret = pinctrl_select_state(cyccg->pinctrl,
+					   cyccg->cypress_ic2_int);
+		if (ret < 0)
+			pr_info("%s: Failed to select %s pinstate %d\n",
+				__func__, "cypress_ic2_int", ret);
+	}
+
+	ret = cyccg_pinctrl_lookup_pair(cyccg->dev, &cyccg->usb_logic_pinctrl,
+					"usb_logic_active",
+					&cyccg->usb_logic_active,
+					"usb_logic_suspend",
+					&cyccg->usb_logic_suspend,
+					"usb_logic");
+	if (!ret) {
+		ret = pinctrl_select_state(cyccg->usb_logic_pinctrl,
+					   cyccg->usb_logic_active);
+		if (ret < 0)
+			pr_info("%s: Failed to select %s pinstate %d\n",
+				__func__, "usb_logic_active", ret);
+	}
+
+	ret = cyccg_pinctrl_lookup_pair(cyccg->dev, &cyccg->vbus_status_pinctrl,
+					"vbus_status_active",
+					&cyccg->vbus_status_active,
+					"vbus_status_suspend",
+					&cyccg->vbus_status_suspend,
+					"vbus_status");
+	if (!ret) {
+		ret = pinctrl_select_state(cyccg->vbus_status_pinctrl,
+					   cyccg->vbus_status_active);
+		if (ret < 0)
+			pr_info("%s: Failed to select %s pinstate %d\n",
+				__func__, "vbus_status_active", ret);
+	}
+
+	return 0;
+}
+
 int cyccg_probe(struct device *dev, int irq, struct ccg_bus_operations *ops)
 {
 	struct cyccg *cyccg;
@@ -2687,6 +2986,12 @@ int cyccg_probe(struct device *dev, int irq, struct ccg_bus_operations *ops)
 		cyccg_err("failed to parse and get pdata, %d\n", err);
 		return err;
 	}
+
+	INIT_WORK(&cyccg->uevent_work, cyccg_usb_uevent_work);
+
+	err = cyccg_i2c_pinctrl_init(cyccg);
+	if (err)
+		cyccg_err("failed to pinctrl init=%d\n", err);
 
 	err = cyccg_gpio_init(cyccg);
 	if (err) {
@@ -2743,6 +3048,12 @@ int cyccg_probe(struct device *dev, int irq, struct ccg_bus_operations *ops)
 	err = cyccg_sysfs_init(cyccg);
 	if (err) {
 		cyccg_err("failed to initialize sysfs interfaces, %d\n", err);
+		return err;
+	}
+
+	err = cyccg_extcon_init(cyccg);
+	if (err) {
+		cyccg_err("failed to initialize extcon, %d\n", err);
 		return err;
 	}
 
